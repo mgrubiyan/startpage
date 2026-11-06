@@ -14,7 +14,10 @@ import (
 type Deps struct {
 	Logger *slog.Logger
 	Static fs.FS
-	Store  Store
+	Store   Store
+	Weather WeatherSource
+	Rates   RatesSource
+	Suggest SuggestSource
 	// Ping reports whether the service can reach its database.
 	Ping func(ctx context.Context) error
 	// Now is the clock; nil means time.Now.
@@ -28,7 +31,15 @@ func New(d Deps) http.Handler {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
-	a := &api{store: d.Store, logger: d.Logger, now: d.Now, onServicesChanged: d.OnServicesChanged}
+	a := &api{
+		store:             d.Store,
+		weather:           d.Weather,
+		rates:             d.Rates,
+		suggest:           d.Suggest,
+		logger:            d.Logger,
+		now:               d.Now,
+		onServicesChanged: d.OnServicesChanged,
+	}
 
 	apiMux := http.NewServeMux()
 	apiMux.HandleFunc("GET /api/settings", a.getSettings)
@@ -39,6 +50,9 @@ func New(d Deps) http.Handler {
 	apiMux.HandleFunc("GET /api/services", a.listServices)
 	apiMux.HandleFunc("POST /api/services", a.createService)
 	apiMux.HandleFunc("DELETE /api/services/{id}", a.deleteService)
+	apiMux.HandleFunc("GET /api/weather", a.getWeather)
+	apiMux.HandleFunc("GET /api/rates", a.getRates)
+	apiMux.HandleFunc("GET /api/suggest", a.getSuggestions)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz(d.Ping))

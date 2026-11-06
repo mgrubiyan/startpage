@@ -12,9 +12,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mgrubiyan/startpage/internal/cache"
 	"github.com/mgrubiyan/startpage/internal/config"
+	"github.com/mgrubiyan/startpage/internal/fetch"
 	"github.com/mgrubiyan/startpage/internal/httpapi"
+	"github.com/mgrubiyan/startpage/internal/rates"
 	"github.com/mgrubiyan/startpage/internal/store/postgres"
+	"github.com/mgrubiyan/startpage/internal/suggest"
+	"github.com/mgrubiyan/startpage/internal/weather"
 	"github.com/mgrubiyan/startpage/web"
 )
 
@@ -48,11 +53,21 @@ func run() error {
 		return fmt.Errorf("migrate: %w", err)
 	}
 
+	upstream := fetch.NewClient()
+	weatherClient := weather.New(upstream)
+	ratesClient := rates.New(upstream)
+	suggestClient := suggest.New(upstream)
+
 	handler := httpapi.New(httpapi.Deps{
-		Logger: logger,
-		Static: web.Static(),
-		Store:  db,
-		Ping:   db.Ping,
+		Logger:  logger,
+		Static:  web.Static(),
+		Store:   db,
+		Ping:    db.Ping,
+		Weather: cache.New(10*time.Minute, weatherClient.Current, cache.WithMaxEntries(50)),
+		Rates: cache.New(time.Hour, func(ctx context.Context, _ string) (rates.Rates, error) {
+			return ratesClient.Latest(ctx)
+		}),
+		Suggest: cache.New(time.Hour, suggestClient.Suggest, cache.WithLoadTimeout(3*time.Second)),
 	})
 
 	srv := &http.Server{

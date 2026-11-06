@@ -67,8 +67,11 @@ type serviceDTO struct {
 }
 
 type api struct {
-	store  Store
-	logger *slog.Logger
+	store   Store
+	weather WeatherSource
+	rates   RatesSource
+	suggest SuggestSource
+	logger  *slog.Logger
 	now    func() time.Time
 	// onServicesChanged lets the monitor check a new service right away instead of waiting a tick.
 	onServicesChanged func()

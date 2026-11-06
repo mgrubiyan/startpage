@@ -14,7 +14,10 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/mgrubiyan/startpage/internal/cache"
+	"github.com/mgrubiyan/startpage/internal/rates"
 	"github.com/mgrubiyan/startpage/internal/store"
+	"github.com/mgrubiyan/startpage/internal/weather"
 )
 
 var testNow = time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
@@ -121,20 +124,50 @@ func (f *fakeStore) DeleteService(_ context.Context, id int64) error {
 	return store.ErrNotFound
 }
 
+// fakeSource is an in-memory stand-in for a *cache.Cache that records requested keys.
+type fakeSource[V any] struct {
+	mu    sync.Mutex
+	value V
+	stale bool
+	err   error
+	keys  []string
+}
+
+func (f *fakeSource[V]) Get(_ context.Context, key string) (cache.Result[V], error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.keys = append(f.keys, key)
+	if f.err != nil {
+		return cache.Result[V]{}, f.err
+	}
+	return cache.Result[V]{Value: f.value, FetchedAt: testNow, Stale: f.stale}, nil
+}
+
 type testEnv struct {
 	handler        http.Handler
 	store          *fakeStore
+	weather        *fakeSource[weather.Report]
+	rates          *fakeSource[rates.Rates]
+	suggest        *fakeSource[[]string]
 	servicesChange int
 	pingErr        error
 }
 
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
-	env := &testEnv{store: newFakeStore()}
+	env := &testEnv{
+		store:   newFakeStore(),
+		weather: &fakeSource[weather.Report]{},
+		rates:   &fakeSource[rates.Rates]{},
+		suggest: &fakeSource[[]string]{value: []string{}},
+	}
 	env.handler = New(Deps{
 		Logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Static:            fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>t</title>")}},
 		Store:             env.store,
+		Weather:           env.weather,
+		Rates:             env.rates,
+		Suggest:           env.suggest,
 		Ping:              func(context.Context) error { return env.pingErr },
 		Now:               func() time.Time { return testNow },
 		OnServicesChanged: func() { env.servicesChange++ },
