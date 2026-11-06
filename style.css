@@ -1,0 +1,228 @@
+:root {
+  --bg: #f6f5f2;
+  --surface: #ffffff;
+  --text: #1c1c1e;
+  --muted: #6e6e73;
+  --border: #e3e1dc;
+  --accent: #3b6ef5;
+  --danger: #d93a3a;
+  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121214;
+    --surface: #1c1c1f;
+    --text: #ececef;
+    --muted: #8e8e95;
+    --border: #2c2c31;
+    --accent: #7a9bff;
+    --danger: #ff6b6b;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  min-height: 100vh;
+}
+button, input, select { font: inherit; color: inherit; }
+
+.wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 12vh 16px 48px;
+}
+
+.top {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 28px;
+}
+.time {
+  font-size: 64px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.date { color: var(--muted); margin-top: 6px; }
+
+.widgets { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+}
+.chip-label { font-size: 12px; color: var(--muted); }
+.chip-value { font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.up, .down { font-size: 10px; margin: 0 6px 0 3px; vertical-align: 1px; }
+.up { color: #2e9d57; }
+.down { color: var(--danger); }
+
+.search { position: relative; margin-bottom: 36px; }
+.search input {
+  width: 100%;
+  padding: 16px 120px 16px 20px;
+  font-size: 18px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  outline: none;
+}
+.search input:focus { border-color: var(--accent); }
+.engine-hint {
+  position: absolute;
+  right: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 13px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.bookmarks-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.bookmarks-head h2 { font-size: 13px; font-weight: 500; color: var(--muted); margin: 0; text-transform: uppercase; letter-spacing: .06em; }
+.actions { display: flex; gap: 4px; }
+.ghost {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  padding: 4px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.ghost:hover, .ghost[aria-pressed="true"] { color: var(--text); background: var(--surface); }
+
+.bookmarks {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+}
+.bookmarks li { position: relative; }
+.bookmarks a {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 8px 10px;
+  border-radius: 12px;
+  text-decoration: none;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  transition: transform .12s ease, border-color .12s ease;
+}
+.bookmarks a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.bookmarks a:active { transform: scale(.97); }
+.icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  color: #fff;
+  overflow: hidden;
+}
+.icon img { width: 24px; height: 24px; }
+.label { font-size: 13px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--danger);
+  color: #fff;
+  cursor: pointer;
+  line-height: 22px;
+  padding: 0;
+  display: none;
+}
+.editing .remove { display: block; }
+
+.add-bookmark, .settings {
+  margin-top: 16px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+.add-bookmark input, .settings input, .settings select {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  min-width: 0;
+}
+.add-bookmark input { flex: 1 1 160px; }
+.settings label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); flex: 1 1 200px; }
+.settings label > * { font-size: 15px; color: var(--text); }
+.add-bookmark button, .settings button {
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+.settings label.wide { flex-basis: 100%; }
+.settings textarea {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: vertical;
+}
+.settings code { font-size: 12px; }
+
+.services-head { margin-top: 28px; }
+.services { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.services li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.services .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.services .meta { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.ok { background: #2e9d57; }
+.dot.fail { background: var(--danger); }
+.services li.empty { color: var(--muted); font-size: 13px; }
+
+.error { color: var(--danger); font-size: 13px; flex-basis: 100%; }
+.muted { color: var(--muted); font-size: 13px; }
+[hidden] { display: none !important; }
+
+@media (max-width: 520px) {
+  .time { font-size: 48px; }
+  .wrap { padding-top: 6vh; }
+}

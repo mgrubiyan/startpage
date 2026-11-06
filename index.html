@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Новая вкладка</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="top">
+      <div class="clock">
+        <div id="time" class="time">--:--</div>
+        <div id="date" class="date"></div>
+      </div>
+      <div class="widgets">
+        <div class="chip" id="weather" title="Погода">
+          <span class="chip-label" id="weather-city">Погода</span>
+          <span class="chip-value" id="weather-value">—</span>
+        </div>
+        <div class="chip" id="rates" title="Курс ЦБ РФ">
+          <span class="chip-label">ЦБ РФ</span>
+          <span class="chip-value" id="rates-value">—</span>
+        </div>
+      </div>
+    </header>
+
+    <form id="search" class="search" autocomplete="off">
+      <input id="q" name="q" type="text" autofocus spellcheck="false"
+             placeholder="Поиск или адрес · g y d gh yt w — префиксы">
+      <span id="engine-hint" class="engine-hint"></span>
+    </form>
+
+    <section class="bookmarks-head">
+      <h2>Закладки</h2>
+      <div class="actions">
+        <button type="button" id="edit-toggle" class="ghost">Изменить</button>
+        <button type="button" id="settings-toggle" class="ghost">Настройки</button>
+      </div>
+    </section>
+
+    <ul id="bookmarks" class="bookmarks"></ul>
+
+    <form id="add-bookmark" class="add-bookmark" hidden>
+      <input id="bm-title" type="text" placeholder="Название" required maxlength="40">
+      <input id="bm-url" type="text" placeholder="https://…" required>
+      <button type="submit">Добавить</button>
+      <span id="bm-error" class="error"></span>
+    </form>
+
+    <section class="bookmarks-head services-head">
+      <h2>Сервисы</h2>
+    </section>
+    <ul id="services" class="services"></ul>
+
+    <form id="settings" class="settings" hidden>
+      <label>Поиск по умолчанию
+        <select id="set-engine"></select>
+      </label>
+      <label>Город для погоды
+        <input id="set-city" type="text" maxlength="60">
+      </label>
+      <label class="wide">Сервисы для проверки — по одному на строку: <code>Название | https://адрес/health</code>
+        <textarea id="set-services" rows="3" spellcheck="false" placeholder="instatrack | https://bots.example.ru/health"></textarea>
+      </label>
+      <button type="submit">Сохранить</button>
+      <span id="set-status" class="muted"></span>
+    </form>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
