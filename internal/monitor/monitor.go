@@ -1,0 +1,223 @@
+// Package monitor periodically probes registered HTTP services and records the results.
+//
+// Probes go to user-configured URLs, including private addresses on purpose: the main
+// use case is watching bots on the same host or Docker network. The endpoint that
+// registers URLs is behind authentication, and each probe is bounded (timeout,
+// redirect limit, body read limit), so the monitor cannot be used to pull data out.
+package monitor
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"sync"
+	"time"
+
+	"github.com/mgrubiyan/startpage/internal/fetch"
+	"github.com/mgrubiyan/startpage/internal/store"
+)
+
+// Store is the persistence the monitor needs; *postgres.Store implements it.
+type Store interface {
+	Services(ctx context.Context) ([]store.Service, error)
+	RecordChecks(ctx context.Context, checks []store.Check) error
+	PruneChecks(ctx context.Context, before time.Time) (int64, error)
+}
+
+// Config tunes the monitor.
+type Config struct {
+	Interval  time.Duration // time between rounds
+	Timeout   time.Duration // per-probe timeout
+	Workers   int           // max concurrent probes
+	Retention time.Duration // how long check history is kept
+}
+
+const (
+	maxRedirects  = 3
+	maxBodyBytes  = 64 << 10
+	maxErrorChars = 200
+	pruneEvery    = time.Hour
+)
+
+// Monitor runs probe rounds on a ticker or on demand.
+type Monitor struct {
+	store   Store
+	logger  *slog.Logger
+	cfg     Config
+	client  *http.Client
+	trigger chan struct{}
+}
+
+// New returns a Monitor. Zero Config fields get sensible defaults.
+func New(s Store, logger *slog.Logger, cfg Config) *Monitor {
+	if cfg.Interval <= 0 {
+		cfg.Interval = time.Minute
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 5 * time.Second
+	}
+	if cfg.Workers <= 0 {
+		cfg.Workers = 4
+	}
+	if cfg.Retention <= 0 {
+		cfg.Retention = 7 * 24 * time.Hour
+	}
+	return &Monitor{
+		store:  s,
+		logger: logger,
+		cfg:    cfg,
+		client: &http.Client{
+			Timeout: cfg.Timeout,
+			CheckRedirect: func(_ *http.Request, via []*http.Request) error {
+				if len(via) >= maxRedirects {
+					return fmt.Errorf("stopped after %d redirects", maxRedirects)
+				}
+				return nil
+			},
+		},
+		trigger: make(chan struct{}, 1),
+	}
+}
+
+// Trigger asks for a probe round as soon as possible. It never blocks;
+// triggers arriving while a round is pending are coalesced into one.
+func (m *Monitor) Trigger() {
+	select {
+	case m.trigger <- struct{}{}:
+	default:
+	}
+}
+
+// Run probes all services immediately and then every Interval until ctx is done.
+// It returns only after in-flight probes have finished, so callers can close the
+// database right after Run returns.
+func (m *Monitor) Run(ctx context.Context) {
+	ticker := time.NewTicker(m.cfg.Interval)
+	defer ticker.Stop()
+
+	var lastPrune time.Time
+	for {
+		m.round(ctx)
+		if time.Since(lastPrune) >= pruneEvery && ctx.Err() == nil {
+			m.prune(ctx)
+			lastPrune = time.Now()
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		case <-m.trigger:
+		}
+	}
+}
+
+func (m *Monitor) round(ctx context.Context) {
+	services, err := m.store.Services(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			m.logger.Error("monitor: list services", "err", err)
+		}
+		return
+	}
+	if len(services) == 0 {
+		return
+	}
+	checks := m.probeAll(ctx, services)
+	// Probes cut short by shutdown would be recorded as false outages; drop the round.
+	if ctx.Err() != nil {
+		return
+	}
+	if err := m.store.RecordChecks(ctx, checks); err != nil {
+		m.logger.Error("monitor: record checks", "err", err)
+	}
+}
+
+// probeAll fans services out to a bounded pool of workers.
+func (m *Monitor) probeAll(ctx context.Context, services []store.Service) []store.Check {
+	results := make([]store.Check, len(services))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range min(m.cfg.Workers, len(services)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				results[i] = m.probe(ctx, services[i])
+			}
+		}()
+	}
+feed:
+	for i := range services {
+		select {
+		case jobs <- i:
+		case <-ctx.Done():
+			break feed
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	return results
+}
+
+func (m *Monitor) probe(ctx context.Context, svc store.Service) store.Check {
+	start := time.Now()
+	check := store.Check{ServiceID: svc.ID, CheckedAt: start}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, svc.URL, nil)
+	if err != nil {
+		check.Error = truncate(err.Error())
+		return check
+	}
+	req.Header.Set("User-Agent", fetch.UserAgent)
+
+	resp, err := m.client.Do(req)
+	check.Latency = time.Since(start)
+	if err != nil {
+		check.Error = describe(err)
+		return check
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBodyBytes))
+	_ = resp.Body.Close()
+
+	check.StatusCode = resp.StatusCode
+	check.OK = resp.StatusCode >= 200 && resp.StatusCode < 400
+	if !check.OK {
+		check.Error = "HTTP " + resp.Status
+	}
+	return check
+}
+
+func (m *Monitor) prune(ctx context.Context) {
+	n, err := m.store.PruneChecks(ctx, time.Now().Add(-m.cfg.Retention))
+	if err != nil {
+		m.logger.Error("monitor: prune checks", "err", err)
+		return
+	}
+	if n > 0 {
+		m.logger.Info("monitor: pruned old checks", "rows", n)
+	}
+}
+
+// describe turns a client error into a short message without repeating the URL.
+func describe(err error) string {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		if urlErr.Timeout() {
+			return "timeout"
+		}
+		err = urlErr.Err
+	}
+	return truncate(err.Error())
+}
+
+func truncate(s string) string {
+	r := []rune(s)
+	if len(r) <= maxErrorChars {
+		return s
+	}
+	return string(r[:maxErrorChars]) + "…"
+}

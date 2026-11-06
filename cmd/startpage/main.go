@@ -16,6 +16,7 @@ import (
 	"github.com/mgrubiyan/startpage/internal/config"
 	"github.com/mgrubiyan/startpage/internal/fetch"
 	"github.com/mgrubiyan/startpage/internal/httpapi"
+	"github.com/mgrubiyan/startpage/internal/monitor"
 	"github.com/mgrubiyan/startpage/internal/rates"
 	"github.com/mgrubiyan/startpage/internal/store/postgres"
 	"github.com/mgrubiyan/startpage/internal/suggest"
@@ -53,6 +54,20 @@ func run() error {
 		return fmt.Errorf("migrate: %w", err)
 	}
 
+	mon := monitor.New(db, logger, monitor.Config{Interval: cfg.MonitorInterval})
+	monitorCtx, stopMonitor := context.WithCancel(ctx)
+	monitorDone := make(chan struct{})
+	go func() {
+		defer close(monitorDone)
+		mon.Run(monitorCtx)
+	}()
+	// Deferred calls run in reverse order, so this stops the monitor and waits for
+	// in-flight probes before db.Close — on signal and on any early error return alike.
+	defer func() {
+		stopMonitor()
+		<-monitorDone
+	}()
+
 	upstream := fetch.NewClient()
 	weatherClient := weather.New(upstream)
 	ratesClient := rates.New(upstream)
@@ -67,7 +82,8 @@ func run() error {
 		Rates: cache.New(time.Hour, func(ctx context.Context, _ string) (rates.Rates, error) {
 			return ratesClient.Latest(ctx)
 		}),
-		Suggest: cache.New(time.Hour, suggestClient.Suggest, cache.WithLoadTimeout(3*time.Second)),
+		Suggest:           cache.New(time.Hour, suggestClient.Suggest, cache.WithLoadTimeout(3*time.Second)),
+		OnServicesChanged: mon.Trigger,
 	})
 
 	srv := &http.Server{
