@@ -1,9 +1,6 @@
 'use strict';
 
-// ---------- storage ----------
-const KEY = 'startpage.v1';
-const RATES_KEY = 'startpage.rates';
-
+// Search prefixes. Navigation happens in the browser; the server only supplies suggestions.
 const ENGINES = {
   g:  { name: 'Google',     url: 'https://www.google.com/search?q=' },
   y:  { name: 'Яндекс',     url: 'https://yandex.ru/search/?text=' },
@@ -13,34 +10,6 @@ const ENGINES = {
   w:  { name: 'Википедия',  url: 'https://ru.wikipedia.org/w/index.php?search=' },
 };
 
-const DEFAULTS = {
-  engine: 'g',
-  city: 'Санкт-Петербург',
-  geo: null,
-  bookmarks: [
-    { title: 'GitHub',   url: 'https://github.com' },
-    { title: 'Claude',   url: 'https://claude.ai' },
-    { title: 'YouTube',  url: 'https://www.youtube.com' },
-    { title: 'Gmail',    url: 'https://mail.google.com' },
-    { title: 'Telegram', url: 'https://web.telegram.org' },
-    { title: 'Карты',    url: 'https://yandex.ru/maps' },
-  ],
-  services: [],
-};
-
-function readJSON(key) {
-  try { return JSON.parse(localStorage.getItem(key)); } catch { return null; }
-}
-function writeJSON(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage blocked: work in-memory */ }
-}
-
-const state = Object.assign({}, DEFAULTS, readJSON(KEY) || {});
-if (!ENGINES[state.engine]) state.engine = DEFAULTS.engine;
-if (!Array.isArray(state.bookmarks)) state.bookmarks = DEFAULTS.bookmarks.slice();
-if (!Array.isArray(state.services)) state.services = [];
-const save = () => writeJSON(KEY, state);
-
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -49,7 +18,38 @@ const el = (tag, cls, text) => {
   return n;
 };
 
-// Only http(s) URLs are allowed anywhere a link is rendered or opened.
+const state = { settings: { searchEngine: 'g', city: '' } };
+
+// ---------- API ----------
+class AuthError extends Error {}
+
+async function api(path, { method = 'GET', body, signal } = {}) {
+  const init = { method, signal, credentials: 'same-origin', headers: {} };
+  if (body !== undefined) {
+    init.headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, init);
+  if (res.status === 401 && path !== '/api/login') {
+    showLogin();
+    throw new AuthError('unauthorized');
+  }
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const data = await res.json();
+      if (data && data.error) msg = data.error;
+    } catch { /* body was not JSON */ }
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+const ignorable = (e) => e instanceof AuthError || e.name === 'AbortError';
+
+// ---------- URLs ----------
 function safeUrl(raw) {
   try {
     const u = new URL(raw);
@@ -57,22 +57,6 @@ function safeUrl(raw) {
   } catch { return null; }
 }
 
-// ---------- widget: clock ----------
-function clockWidget() {
-  const time = $('time');
-  const date = $('date');
-  const tick = () => {
-    const now = new Date();
-    time.textContent = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-    const d = now.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
-    date.textContent = d.charAt(0).toUpperCase() + d.slice(1);
-  };
-  tick();
-  setInterval(tick, 1000);
-}
-
-// ---------- widget: search ----------
-// "gh query" -> GitHub search; plain text -> default engine; things that look like an address open directly.
 function looksLikeAddress(s) {
   if (/\s/.test(s)) return null;
   if (/^https?:\/\//i.test(s)) return safeUrl(s);
@@ -81,156 +65,126 @@ function looksLikeAddress(s) {
   return null;
 }
 
+function parsePrefix(s) {
+  const m = s.match(/^(\S+)\s+(.*)$/);
+  if (m && ENGINES[m[1].toLowerCase()]) return { prefix: m[1].toLowerCase(), text: m[2].trim() };
+  return { prefix: '', text: s };
+}
+
 function resolveQuery(raw) {
   const s = raw.trim();
   if (!s) return null;
-  const m = s.match(/^(\S+)\s+(.+)$/);
-  if (m && ENGINES[m[1].toLowerCase()]) {
-    const e = ENGINES[m[1].toLowerCase()];
-    return { url: e.url + encodeURIComponent(m[2].trim()), label: e.name };
+  const { prefix, text } = parsePrefix(s);
+  if (prefix && text) {
+    const e = ENGINES[prefix];
+    return { url: e.url + encodeURIComponent(text), label: e.name };
   }
   const addr = looksLikeAddress(s);
   if (addr) return { url: addr, label: 'Открыть' };
-  const e = ENGINES[state.engine];
+  const e = ENGINES[state.settings.searchEngine] || ENGINES.g;
   return { url: e.url + encodeURIComponent(s), label: e.name };
 }
 
-function searchWidget() {
-  const form = $('search');
-  const q = $('q');
-  const hint = $('engine-hint');
-  const updateHint = () => {
-    const r = resolveQuery(q.value);
-    hint.textContent = r ? r.label : ENGINES[state.engine].name;
-  };
-  q.addEventListener('input', updateHint);
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const r = resolveQuery(q.value);
-    if (r) location.href = r.url;
-  });
-  updateHint();
-  q.focus();
-  return { refresh: updateHint };
+// ---------- timers ----------
+let timers = [];
+const every = (fn, ms) => timers.push(setInterval(fn, ms));
+const stopTimers = () => { timers.forEach(clearInterval); timers = []; };
+
+// ---------- login ----------
+function showLogin() {
+  stopTimers();
+  $('app').hidden = true;
+  $('login').hidden = false;
+  $('login-password').focus();
 }
 
-// ---------- widget: weather (Open-Meteo, no key) ----------
-const WMO = [
-  [[0], '☀️', 'ясно'],
-  [[1, 2], '🌤️', 'малооблачно'],
-  [[3], '☁️', 'пасмурно'],
-  [[45, 48], '🌫️', 'туман'],
-  [[51, 53, 55, 56, 57], '🌦️', 'морось'],
-  [[61, 63, 65, 66, 67, 80, 81, 82], '🌧️', 'дождь'],
-  [[71, 73, 75, 77, 85, 86], '🌨️', 'снег'],
-  [[95, 96, 99], '⛈️', 'гроза'],
-];
-function describeWeather(code) {
-  const hit = WMO.find(([codes]) => codes.includes(code));
-  return hit ? { icon: hit[1], text: hit[2] } : { icon: '🌡️', text: '' };
+function showApp() {
+  $('login').hidden = true;
+  $('app').hidden = false;
+  $('q').focus();
 }
 
-async function fetchJSON(url) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 8000);
+$('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('login-error');
+  err.textContent = '';
   try {
-    const res = await fetch(url, { signal: ctrl.signal });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return await res.json();
-  } finally {
-    clearTimeout(t);
+    await api('/api/login', { method: 'POST', body: { password: $('login-password').value } });
+    $('login-form').reset();
+    boot();
+  } catch (ex) {
+    err.textContent = ex.status === 401 ? 'Неверный пароль'
+      : ex.status === 429 ? 'Слишком много попыток, подожди минуту'
+      : 'Сервер недоступен: ' + ex.message;
   }
+});
+
+$('logout').addEventListener('click', async () => {
+  try { await api('/api/logout', { method: 'POST', body: {} }); } catch { /* cookie is cleared either way */ }
+  showLogin();
+});
+
+// ---------- clock ----------
+function tick() {
+  const now = new Date();
+  $('time').textContent = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const d = now.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+  $('date').textContent = d.charAt(0).toUpperCase() + d.slice(1);
 }
 
-async function geocode(city) {
-  if (state.geo && state.geo.city === city) return state.geo;
-  const data = await fetchJSON('https://geocoding-api.open-meteo.com/v1/search?count=1&language=ru&name=' + encodeURIComponent(city));
-  const r = data.results && data.results[0];
-  if (!r) throw new Error('город не найден');
-  state.geo = { city, lat: r.latitude, lon: r.longitude, name: r.name };
-  save();
-  return state.geo;
-}
+// ---------- weather ----------
+const fmtTemp = (t) => { const r = Math.round(t); return (r > 0 ? '+' : '') + r + '°'; };
 
 async function loadWeather() {
-  const label = $('weather-city');
-  const value = $('weather-value');
-  label.textContent = state.city;
-  value.textContent = '…';
   try {
-    const geo = await geocode(state.city);
-    label.textContent = geo.name;
-    const data = await fetchJSON(
-      `https://api.open-meteo.com/v1/forecast?latitude=${geo.lat}&longitude=${geo.lon}` +
-      '&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m&wind_speed_unit=ms&timezone=auto'
-    );
-    const c = data.current;
-    const w = describeWeather(c.weather_code);
-    const temp = Math.round(c.temperature_2m);
-    value.textContent = `${w.icon} ${temp > 0 ? '+' : ''}${temp}° · ${Math.round(c.wind_speed_10m)} м/с`;
-    $('weather').title = `${w.text}, ощущается как ${Math.round(c.apparent_temperature)}°`;
-  } catch (err) {
-    value.textContent = '—';
-    $('weather').title = 'Погода недоступна: ' + err.message;
+    const w = await api('/api/weather');
+    $('weather-city').textContent = w.location;
+    $('weather-value').textContent = `${w.icon} ${fmtTemp(w.temperature)} · ${Math.round(w.windMs)} м/с`;
+    $('weather').title = `${w.description}, ощущается как ${fmtTemp(w.feelsLike)}` + (w.stale ? ' · данные устарели' : '');
+  } catch (e) {
+    if (ignorable(e)) return;
+    $('weather-city').textContent = state.settings.city || 'Погода';
+    $('weather-value').textContent = '—';
+    $('weather').title = 'Погода недоступна: ' + e.message;
   }
 }
 
-function weatherWidget() {
-  loadWeather();
-  setInterval(loadWeather, 30 * 60 * 1000);
-  return { refresh: loadWeather };
-}
-
-// ---------- widget: CBR rates ----------
-function renderRates(r) {
-  const box = $('rates-value');
-  box.textContent = '';
-  [['$', r.usd], ['€', r.eur]].forEach(([sym, v], i) => {
-    if (i) box.append(' ');
-    box.append(`${sym} ${v.value.toFixed(2)}`);
-    const diff = v.value - v.prev;
-    if (Math.abs(diff) >= 0.005) box.append(el('span', diff > 0 ? 'up' : 'down', diff > 0 ? '▲' : '▼'));
-  });
-  $('rates').title = 'Курс ЦБ РФ на ' + new Date(r.date).toLocaleDateString('ru-RU');
-}
-
+// ---------- rates ----------
 async function loadRates() {
-  const cached = readJSON(RATES_KEY);
-  if (cached) renderRates(cached);
+  const box = $('rates-value');
   try {
-    const d = await fetchJSON('https://www.cbr-xml-daily.ru/daily_json.js');
-    const pick = (c) => ({ value: d.Valute[c].Value, prev: d.Valute[c].Previous });
-    const r = { date: d.Date, usd: pick('USD'), eur: pick('EUR') };
-    writeJSON(RATES_KEY, r);
-    renderRates(r);
-  } catch (err) {
-    if (!cached) $('rates-value').textContent = '—';
-    $('rates').title = 'Курсы недоступны: ' + err.message;
+    const r = await api('/api/rates');
+    box.textContent = '';
+    [['$', r.usd], ['€', r.eur]].forEach(([sym, v], i) => {
+      if (i) box.append(' ');
+      box.append(`${sym} ${v.value.toFixed(2)}`);
+      const diff = v.value - v.previous;
+      if (Math.abs(diff) >= 0.005) box.append(el('span', diff > 0 ? 'up' : 'down', diff > 0 ? '▲' : '▼'));
+    });
+    $('rates').title = 'Курс ЦБ РФ на ' + new Date(r.date).toLocaleDateString('ru-RU') + (r.stale ? ' · данные устарели' : '');
+  } catch (e) {
+    if (ignorable(e)) return;
+    box.textContent = '—';
+    $('rates').title = 'Курсы недоступны: ' + e.message;
   }
 }
 
-function ratesWidget() {
-  loadRates();
-  setInterval(loadRates, 60 * 60 * 1000);
-}
-
-// ---------- widget: bookmarks ----------
+// ---------- bookmarks ----------
 function hue(str) {
   let h = 0;
   for (const ch of str) h = (h * 31 + ch.codePointAt(0)) % 360;
   return h;
 }
 
-function bookmarkTile(bm, index) {
+function bookmarkTile(bm) {
   const url = safeUrl(bm.url);
   if (!url) return null;
   const host = new URL(url).hostname;
   const li = el('li');
   const a = el('a');
   a.href = url;
-  const icon = el('span', 'icon');
+  const icon = el('span', 'icon', (bm.title || host).trim().charAt(0).toUpperCase());
   icon.style.background = `hsl(${hue(host)} 55% 50%)`;
-  icon.textContent = (bm.title || host).trim().charAt(0).toUpperCase();
   const img = el('img');
   img.alt = '';
   img.src = 'https://www.google.com/s2/favicons?sz=64&domain=' + encodeURIComponent(host);
@@ -239,162 +193,278 @@ function bookmarkTile(bm, index) {
   const rm = el('button', 'remove', '×');
   rm.type = 'button';
   rm.title = 'Удалить';
-  rm.addEventListener('click', () => {
-    state.bookmarks.splice(index, 1);
-    save();
-    renderBookmarks();
+  rm.addEventListener('click', async () => {
+    try {
+      await api(`/api/bookmarks/${bm.id}`, { method: 'DELETE' });
+      loadBookmarks();
+    } catch (e) {
+      if (!ignorable(e)) $('bm-error').textContent = e.message;
+    }
   });
   li.append(a, rm);
   return li;
 }
 
-function renderBookmarks() {
-  const list = $('bookmarks');
-  list.textContent = '';
-  state.bookmarks.forEach((bm, i) => {
-    const tile = bookmarkTile(bm, i);
-    if (tile) list.append(tile);
-  });
+async function loadBookmarks() {
+  try {
+    const items = await api('/api/bookmarks');
+    const ul = $('bookmarks');
+    ul.textContent = '';
+    items.forEach((bm) => {
+      const tile = bookmarkTile(bm);
+      if (tile) ul.append(tile);
+    });
+  } catch (e) {
+    if (!ignorable(e)) $('bm-error').textContent = 'Закладки не загрузились: ' + e.message;
+  }
 }
 
-function bookmarksWidget() {
-  const list = $('bookmarks');
-  const toggle = $('edit-toggle');
-  const form = $('add-bookmark');
+function toggleEditing(listId, formId, button, firstInputId) {
+  const ul = $(listId);
+  const on = !ul.classList.contains('editing');
+  ul.classList.toggle('editing', on);
+  $(formId).hidden = !on;
+  button.setAttribute('aria-pressed', String(on));
+  button.textContent = on ? 'Готово' : 'Изменить';
+  if (on) $(firstInputId).focus();
+}
+
+$('edit-toggle').addEventListener('click', (e) => toggleEditing('bookmarks', 'add-bookmark', e.currentTarget, 'bm-title'));
+
+$('add-bookmark').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.currentTarget;
   const err = $('bm-error');
-  renderBookmarks();
-
-  toggle.addEventListener('click', () => {
-    const on = !list.classList.contains('editing');
-    list.classList.toggle('editing', on);
-    form.hidden = !on;
-    toggle.setAttribute('aria-pressed', String(on));
-    toggle.textContent = on ? 'Готово' : 'Изменить';
-    if (on) $('bm-title').focus();
-  });
-
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const title = $('bm-title').value.trim();
-    const raw = $('bm-url').value.trim();
-    const url = safeUrl(raw) || looksLikeAddress(raw);
-    if (!url) { err.textContent = 'Нужен адрес вида https://example.com'; return; }
+  const raw = $('bm-url').value.trim();
+  const url = safeUrl(raw) || looksLikeAddress(raw);
+  if (!url) { err.textContent = 'Нужен адрес вида https://example.com'; return; }
+  try {
+    await api('/api/bookmarks', { method: 'POST', body: { title: $('bm-title').value, url } });
     err.textContent = '';
-    state.bookmarks.push({ title, url });
-    save();
-    renderBookmarks();
     form.reset();
     $('bm-title').focus();
-  });
+    loadBookmarks();
+  } catch (ex) {
+    if (!ignorable(ex)) err.textContent = ex.message;
+  }
+});
+
+// ---------- services ----------
+function serviceMeta(s) {
+  const c = s.lastCheck;
+  if (!c) return 'ещё не проверялся';
+  const latency = c.latencyMs < 1 ? '<1 мс' : `${c.latencyMs} мс`;
+  const head = c.ok ? latency : (c.statusCode ? `HTTP ${c.statusCode}` : 'недоступен');
+  if (s.uptime == null) return head;
+  return `${head} · ${s.uptime.toFixed(Number.isInteger(s.uptime) ? 0 : 1)}% за сутки`;
 }
 
-// ---------- widget: services status ----------
-// no-cors fetch: resolves if the host answered at all, rejects on network error / timeout.
-// Good enough for "alive or not" without CORS headers on the target.
-async function ping(url) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 6000);
-  const start = performance.now();
+async function loadServices() {
   try {
-    await fetch(url, { mode: 'no-cors', cache: 'no-store', signal: ctrl.signal });
-    return { ok: true, ms: Math.round(performance.now() - start) };
-  } catch {
-    return { ok: false };
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-function renderServices() {
-  const list = $('services');
-  list.textContent = '';
-  if (!state.services.length) {
-    list.append(el('li', 'empty', 'Пока пусто. Добавь адреса ботов в «Настройках», когда появится сервер.'));
-    return;
-  }
-  state.services.forEach((s) => {
-    const li = el('li');
-    const dot = el('span', 'dot');
-    const meta = el('span', 'meta', '…');
-    li.append(dot, el('span', 'name', s.name), meta);
-    list.append(li);
-    ping(s.url).then((r) => {
-      dot.classList.add(r.ok ? 'ok' : 'fail');
-      meta.textContent = r.ok ? `${r.ms} мс` : 'недоступен';
+    const items = await api('/api/services');
+    const ul = $('services');
+    ul.textContent = '';
+    if (!items.length) {
+      ul.append(el('li', 'empty', 'Пока пусто. Нажми «Изменить» и добавь адрес /health бота.'));
+      return;
+    }
+    items.forEach((s) => {
+      const li = el('li');
+      const status = s.lastCheck ? (s.lastCheck.ok ? 'ok' : 'fail') : '';
+      li.append(el('span', 'dot ' + status), el('span', 'name', s.name), el('span', 'meta', serviceMeta(s)));
+      if (s.lastCheck) {
+        const at = new Date(s.lastCheck.checkedAt).toLocaleTimeString('ru-RU');
+        li.title = `${s.url}\nпроверен в ${at}` + (s.lastCheck.error ? `\n${s.lastCheck.error}` : '');
+      } else {
+        li.title = s.url;
+      }
+      const rm = el('button', 'remove-inline', '×');
+      rm.type = 'button';
+      rm.title = 'Удалить';
+      rm.addEventListener('click', async () => {
+        try {
+          await api(`/api/services/${s.id}`, { method: 'DELETE' });
+          loadServices();
+        } catch (e) {
+          if (!ignorable(e)) $('svc-error').textContent = e.message;
+        }
+      });
+      li.append(rm);
+      ul.append(li);
     });
-  });
+  } catch (e) {
+    if (!ignorable(e)) $('services').textContent = 'Статусы не загрузились: ' + e.message;
+  }
 }
 
-function servicesWidget() {
-  renderServices();
-  setInterval(renderServices, 60 * 1000);
-  return { refresh: renderServices };
-}
+$('services-edit').addEventListener('click', (e) => toggleEditing('services', 'add-service', e.currentTarget, 'svc-name'));
 
-function parseServices(text) {
-  const out = [];
-  const bad = [];
-  text.split('\n').map((l) => l.trim()).filter(Boolean).forEach((line) => {
-    const [name, raw] = line.includes('|') ? line.split('|').map((x) => x.trim()) : [null, line];
-    const url = safeUrl(raw);
-    if (url) out.push({ name: name || new URL(url).host, url });
-    else bad.push(line);
-  });
-  return { out, bad };
-}
+$('add-service').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const err = $('svc-error');
+  const raw = $('svc-url').value.trim();
+  const url = safeUrl(raw) || looksLikeAddress(raw);
+  if (!url) { err.textContent = 'Нужен адрес вида https://example.com/health'; return; }
+  try {
+    await api('/api/services', { method: 'POST', body: { name: $('svc-name').value, url } });
+    err.textContent = '';
+    form.reset();
+    loadServices();
+    // The server probes a new service right away; pick the result up shortly.
+    setTimeout(loadServices, 2000);
+  } catch (ex) {
+    if (!ignorable(ex)) err.textContent = ex.message;
+  }
+});
 
 // ---------- settings ----------
-function settingsPanel(widgets) {
+Object.entries(ENGINES).forEach(([key, e]) => {
+  const o = el('option', null, `${e.name} (${key})`);
+  o.value = key;
+  $('set-engine').append(o);
+});
+
+$('settings-toggle').addEventListener('click', (e) => {
   const form = $('settings');
-  const toggle = $('settings-toggle');
-  const engine = $('set-engine');
-  const city = $('set-city');
-  const services = $('set-services');
+  form.hidden = !form.hidden;
+  e.currentTarget.setAttribute('aria-pressed', String(!form.hidden));
+  if (!form.hidden) {
+    $('set-engine').value = state.settings.searchEngine;
+    $('set-city').value = state.settings.city;
+    $('set-status').textContent = '';
+  }
+});
+
+$('settings').addEventListener('submit', async (e) => {
+  e.preventDefault();
   const status = $('set-status');
-
-  Object.entries(ENGINES).forEach(([key, e]) => {
-    const o = el('option', null, `${e.name} (${key})`);
-    o.value = key;
-    engine.append(o);
-  });
-
-  const fill = () => {
-    engine.value = state.engine;
-    city.value = state.city;
-    services.value = state.services.map((s) => `${s.name} | ${s.url}`).join('\n');
-    status.textContent = '';
-  };
-
-  toggle.addEventListener('click', () => {
-    form.hidden = !form.hidden;
-    toggle.setAttribute('aria-pressed', String(!form.hidden));
-    if (!form.hidden) fill();
-  });
-
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const { out, bad } = parseServices(services.value);
-    if (bad.length) { status.textContent = 'Не понял строку: ' + bad[0]; return; }
-    const newCity = city.value.trim() || DEFAULTS.city;
-    const cityChanged = newCity !== state.city;
-    state.engine = engine.value;
-    state.city = newCity;
-    state.services = out;
-    save();
-    widgets.search.refresh();
-    widgets.services.refresh();
-    if (cityChanged) widgets.weather.refresh();
+  try {
+    const cityChanged = $('set-city').value.trim() !== state.settings.city;
+    state.settings = await api('/api/settings', {
+      method: 'PUT',
+      body: { searchEngine: $('set-engine').value, city: $('set-city').value },
+    });
+    updateHint();
+    if (cityChanged) loadWeather();
     status.textContent = 'Сохранено';
-  });
+  } catch (ex) {
+    if (!ignorable(ex)) status.textContent = ex.message;
+  }
+});
+
+// ---------- search & suggestions ----------
+const q = $('q');
+const sugList = $('suggestions');
+let suggestTimer = null;
+let suggestCtrl = null;
+let active = -1;
+
+function updateHint() {
+  const r = resolveQuery(q.value);
+  $('engine-hint').textContent = r ? r.label : (ENGINES[state.settings.searchEngine] || ENGINES.g).name;
 }
 
+function hideSuggestions() {
+  sugList.hidden = true;
+  sugList.textContent = '';
+  active = -1;
+  q.setAttribute('aria-expanded', 'false');
+  q.removeAttribute('aria-activedescendant');
+}
+
+function renderSuggestions(items, prefix) {
+  sugList.textContent = '';
+  active = -1;
+  if (!items.length) { hideSuggestions(); return; }
+  items.forEach((text, i) => {
+    const li = el('li', null, text);
+    li.id = 'sug-' + i;
+    li.setAttribute('role', 'option');
+    li.dataset.value = prefix ? `${prefix} ${text}` : text;
+    // mousedown, not click: it fires before the input's blur hides the list.
+    li.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      q.value = li.dataset.value;
+      go();
+    });
+    sugList.append(li);
+  });
+  sugList.hidden = false;
+  q.setAttribute('aria-expanded', 'true');
+}
+
+function highlight(i) {
+  const items = sugList.children;
+  if (!items.length) return;
+  active = (i + items.length) % items.length;
+  [...items].forEach((li, j) => li.setAttribute('aria-selected', String(j === active)));
+  q.value = items[active].dataset.value;
+  q.setAttribute('aria-activedescendant', items[active].id);
+  updateHint();
+}
+
+async function fetchSuggestions() {
+  const raw = q.value.trim();
+  const { prefix, text } = parsePrefix(raw);
+  if (!text || looksLikeAddress(raw)) { hideSuggestions(); return; }
+  if (suggestCtrl) suggestCtrl.abort();
+  suggestCtrl = new AbortController();
+  try {
+    const r = await api('/api/suggest?q=' + encodeURIComponent(text), { signal: suggestCtrl.signal });
+    if (q.value.trim() !== raw) return; // the user kept typing while we waited
+    renderSuggestions(r.suggestions, prefix);
+  } catch (e) {
+    if (!ignorable(e)) hideSuggestions();
+  }
+}
+
+function go() {
+  const r = resolveQuery(q.value);
+  hideSuggestions();
+  if (r) location.href = r.url;
+}
+
+q.addEventListener('input', () => {
+  updateHint();
+  clearTimeout(suggestTimer);
+  suggestTimer = setTimeout(fetchSuggestions, 150);
+});
+
+q.addEventListener('keydown', (e) => {
+  if (sugList.hidden) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); highlight(active + 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(active - 1); }
+  else if (e.key === 'Escape') { hideSuggestions(); }
+});
+
+q.addEventListener('blur', () => setTimeout(hideSuggestions, 100));
+
+$('search').addEventListener('submit', (e) => {
+  e.preventDefault();
+  go();
+});
+
 // ---------- boot ----------
-clockWidget();
-const widgets = {
-  search: searchWidget(),
-  weather: weatherWidget(),
-  services: servicesWidget(),
-};
-ratesWidget();
-bookmarksWidget();
-settingsPanel(widgets);
+async function boot() {
+  try {
+    state.settings = await api('/api/settings');
+  } catch (e) {
+    if (e instanceof AuthError) return;
+    // The API failed but the page itself loaded: show it with defaults.
+  }
+  showApp();
+  updateHint();
+  loadWeather();
+  loadRates();
+  loadBookmarks();
+  loadServices();
+  stopTimers();
+  every(loadWeather, 10 * 60 * 1000);
+  every(loadRates, 60 * 60 * 1000);
+  every(loadServices, 30 * 1000);
+}
+
+tick();
+setInterval(tick, 1000);
+boot();

@@ -4,10 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Новая вкладка</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233b6ef5'/%3E%3Ccircle cx='14' cy='14' r='6' fill='none' stroke='white' stroke-width='3'/%3E%3Cpath d='M18.5 18.5l6 6' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main class="wrap">
+  <section id="login" class="login" hidden>
+    <form id="login-form" class="login-card" autocomplete="on">
+      <h1>Startpage</h1>
+      <!-- Single-user login; the hidden username lets password managers file the entry. -->
+      <input type="text" name="username" value="startpage" autocomplete="username" hidden>
+      <input id="login-password" type="password" name="password" placeholder="Пароль" autocomplete="current-password" required>
+      <button type="submit">Войти</button>
+      <span id="login-error" class="error" role="alert"></span>
+    </form>
+  </section>
+
+  <main id="app" class="wrap" hidden>
     <header class="top">
       <div class="clock">
         <div id="time" class="time">--:--</div>
@@ -25,46 +37,56 @@
       </div>
     </header>
 
-    <form id="search" class="search" autocomplete="off">
-      <input id="q" name="q" type="text" autofocus spellcheck="false"
+    <form id="search" class="search" autocomplete="off" role="search">
+      <input id="q" name="q" type="text" spellcheck="false" autofocus
+             role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggestions"
              placeholder="Поиск или адрес · g y d gh yt w — префиксы">
       <span id="engine-hint" class="engine-hint"></span>
+      <ul id="suggestions" class="suggestions" role="listbox" hidden></ul>
     </form>
 
-    <section class="bookmarks-head">
+    <section class="section-head">
       <h2>Закладки</h2>
       <div class="actions">
         <button type="button" id="edit-toggle" class="ghost">Изменить</button>
         <button type="button" id="settings-toggle" class="ghost">Настройки</button>
+        <button type="button" id="logout" class="ghost">Выйти</button>
       </div>
     </section>
 
     <ul id="bookmarks" class="bookmarks"></ul>
 
-    <form id="add-bookmark" class="add-bookmark" hidden>
+    <form id="add-bookmark" class="inline-form" hidden>
       <input id="bm-title" type="text" placeholder="Название" required maxlength="40">
       <input id="bm-url" type="text" placeholder="https://…" required>
       <button type="submit">Добавить</button>
       <span id="bm-error" class="error"></span>
     </form>
 
-    <section class="bookmarks-head services-head">
-      <h2>Сервисы</h2>
-    </section>
-    <ul id="services" class="services"></ul>
-
     <form id="settings" class="settings" hidden>
       <label>Поиск по умолчанию
         <select id="set-engine"></select>
       </label>
       <label>Город для погоды
-        <input id="set-city" type="text" maxlength="60">
-      </label>
-      <label class="wide">Сервисы для проверки — по одному на строку: <code>Название | https://адрес/health</code>
-        <textarea id="set-services" rows="3" spellcheck="false" placeholder="instatrack | https://bots.example.ru/health"></textarea>
+        <input id="set-city" type="text" maxlength="60" required>
       </label>
       <button type="submit">Сохранить</button>
       <span id="set-status" class="muted"></span>
+    </form>
+
+    <section class="section-head services-head">
+      <h2>Сервисы</h2>
+      <div class="actions">
+        <button type="button" id="services-edit" class="ghost">Изменить</button>
+      </div>
+    </section>
+    <ul id="services" class="services"></ul>
+
+    <form id="add-service" class="inline-form" hidden>
+      <input id="svc-name" type="text" placeholder="Название" required maxlength="60">
+      <input id="svc-url" type="text" placeholder="https://bots.example.ru/health" required>
+      <button type="submit">Добавить</button>
+      <span id="svc-error" class="error"></span>
     </form>
   </main>
   <script src="app.js"></script>
