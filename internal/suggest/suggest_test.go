@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func newTestClient(t *testing.T, primary, fallback http.HandlerFunc) (*Client, *atomic.Int32) {
@@ -65,6 +66,21 @@ func TestFallbackOnPrimaryFailure(t *testing.T) {
 				t.Fatalf("got %q, %v", got, err)
 			}
 		})
+	}
+}
+
+// A primary that hangs must not eat the caller's whole deadline: the fallback
+// still gets its turn because each provider has its own timeout.
+func TestFallbackWhenPrimaryHangs(t *testing.T) {
+	hang := func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }
+	c, _ := newTestClient(t, hang, respond(`["q",["from fallback"]]`))
+	c.timeout = 100 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got, err := c.Suggest(ctx, "q")
+	if err != nil || strings.Join(got, ",") != "from fallback" {
+		t.Fatalf("got %q, %v", got, err)
 	}
 }
 

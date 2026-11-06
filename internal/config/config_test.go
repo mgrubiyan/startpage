@@ -66,6 +66,7 @@ func TestLoadErrors(t *testing.T) {
 	}{
 		{"missing db", "DATABASE_URL", "", "DATABASE_URL is required"},
 		{"short password", "STARTPAGE_PASSWORD", "short", "at least 8 characters"},
+		{"password over bcrypt limit", "STARTPAGE_PASSWORD", strings.Repeat("п", 37), "at most 72 bytes"}, // 74 bytes
 		{"bad bool", "STARTPAGE_SECURE_COOKIE", "yes please", "STARTPAGE_SECURE_COOKIE"},
 		{"bad duration", "STARTPAGE_SESSION_TTL", "forever", "STARTPAGE_SESSION_TTL"},
 		{"interval too small", "STARTPAGE_MONITOR_INTERVAL", "1s", "at least 5s"},

@@ -78,6 +78,23 @@ func TestLoginLogoutFlow(t *testing.T) {
 	}
 }
 
+func TestAPIResponsesAreNotCached(t *testing.T) {
+	env := newTestEnv(t)
+	for _, rec := range []*httptest.ResponseRecorder{
+		env.do(t, "GET", "/api/bookmarks", ""),
+		env.doAnon(t, "GET", "/api/settings", ""),        // 401 too
+		env.doAnon(t, "PATCH", "/api/settings", "{}"),    // mux 405
+		env.doAnon(t, "POST", "/api/login", "password="), // 415 from requireJSON
+	} {
+		if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+			t.Errorf("status %d: Cache-Control = %q, want no-store", rec.Code, got)
+		}
+	}
+	if got := env.doAnon(t, "GET", "/healthz", "").Header().Get("Cache-Control"); got == "no-store" {
+		t.Error("no-store leaked outside /api/")
+	}
+}
+
 func TestSecureCookieFlag(t *testing.T) {
 	env := newTestEnv(t, func(d *Deps) { d.SecureCookie = true })
 	rec := env.doAnon(t, "POST", "/api/login", `{"password":"correct-horse"}`)

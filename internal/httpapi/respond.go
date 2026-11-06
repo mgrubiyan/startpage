@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 )
@@ -37,14 +38,33 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			return fmt.Errorf("body larger than %d bytes", maxErr.Limit)
-		}
-		return fmt.Errorf("invalid json: %w", err)
+		return jsonError(err)
 	}
-	if dec.More() {
+	// More() would miss a stray '}' or ']', so require a clean EOF instead.
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return jsonError(err)
+		}
 		return errors.New("invalid json: unexpected data after object")
 	}
 	return nil
+}
+
+var errBodyTooLarge = fmt.Errorf("body larger than %d bytes", maxBodyBytes)
+
+func jsonError(err error) error {
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		return errBodyTooLarge
+	}
+	return fmt.Errorf("invalid json: %w", err)
+}
+
+// badBody reports a decodeJSON failure: 413 for oversized bodies, 400 otherwise.
+func badBody(w http.ResponseWriter, err error) {
+	status := http.StatusBadRequest
+	if errors.Is(err, errBodyTooLarge) {
+		status = http.StatusRequestEntityTooLarge
+	}
+	writeError(w, status, err.Error())
 }

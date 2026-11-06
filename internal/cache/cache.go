@@ -3,6 +3,8 @@
 // Concurrent misses for one key are collapsed into a single upstream call
 // (singleflight). Failed loads are never cached; if a previous value exists
 // it is served as stale instead, so a flaky upstream does not blank the page.
+// After a failed refresh the stale value is served immediately for a short
+// backoff, so a dead upstream doesn't make every request wait out the timeout.
 package cache
 
 import (
@@ -27,15 +29,17 @@ type Result[V any] struct {
 type entry[V any] struct {
 	value     V
 	fetchedAt time.Time
+	failedAt  time.Time // last failed refresh of this expired entry, if any
 }
 
 // Cache memoizes a Loader per key for a fixed TTL.
 type Cache[V any] struct {
-	load        Loader[V]
-	ttl         time.Duration
-	loadTimeout time.Duration
-	maxEntries  int
-	now         func() time.Time
+	load         Loader[V]
+	ttl          time.Duration
+	loadTimeout  time.Duration
+	errorBackoff time.Duration
+	maxEntries   int
+	now          func() time.Time
 
 	group singleflight.Group
 
@@ -47,13 +51,18 @@ type Cache[V any] struct {
 type Option func(*options)
 
 type options struct {
-	loadTimeout time.Duration
-	maxEntries  int
-	now         func() time.Time
+	loadTimeout  time.Duration
+	errorBackoff time.Duration
+	maxEntries   int
+	now          func() time.Time
 }
 
 // WithLoadTimeout bounds one upstream call (default 5s).
 func WithLoadTimeout(d time.Duration) Option { return func(o *options) { o.loadTimeout = d } }
+
+// WithErrorBackoff sets how long a stale value is served without retrying
+// after a failed refresh (default 30s).
+func WithErrorBackoff(d time.Duration) Option { return func(o *options) { o.errorBackoff = d } }
 
 // WithMaxEntries bounds memory for caches keyed by user input (default 1000).
 func WithMaxEntries(n int) Option { return func(o *options) { o.maxEntries = n } }
@@ -63,17 +72,18 @@ func WithClock(now func() time.Time) Option { return func(o *options) { o.now = 
 
 // New returns a Cache that keeps values for ttl.
 func New[V any](ttl time.Duration, load Loader[V], opts ...Option) *Cache[V] {
-	o := options{loadTimeout: 5 * time.Second, maxEntries: 1000, now: time.Now}
+	o := options{loadTimeout: 5 * time.Second, errorBackoff: 30 * time.Second, maxEntries: 1000, now: time.Now}
 	for _, opt := range opts {
 		opt(&o)
 	}
 	return &Cache[V]{
-		load:        load,
-		ttl:         ttl,
-		loadTimeout: o.loadTimeout,
-		maxEntries:  max(o.maxEntries, 1),
-		now:         o.now,
-		items:       make(map[string]entry[V]),
+		load:         load,
+		ttl:          ttl,
+		loadTimeout:  o.loadTimeout,
+		errorBackoff: o.errorBackoff,
+		maxEntries:   max(o.maxEntries, 1),
+		now:          o.now,
+		items:        make(map[string]entry[V]),
 	}
 }
 
@@ -82,8 +92,14 @@ func (c *Cache[V]) Get(ctx context.Context, key string) (Result[V], error) {
 	c.mu.Lock()
 	cached, ok := c.items[key]
 	c.mu.Unlock()
-	if ok && c.now().Sub(cached.fetchedAt) < c.ttl {
-		return Result[V]{Value: cached.value, FetchedAt: cached.fetchedAt}, nil
+	if ok {
+		now := c.now()
+		if now.Sub(cached.fetchedAt) < c.ttl {
+			return Result[V]{Value: cached.value, FetchedAt: cached.fetchedAt}, nil
+		}
+		if !cached.failedAt.IsZero() && now.Sub(cached.failedAt) < c.errorBackoff {
+			return Result[V]{Value: cached.value, FetchedAt: cached.fetchedAt, Stale: true}, nil
+		}
 	}
 
 	// The shared load must not die with whichever caller happened to start it,
@@ -94,6 +110,7 @@ func (c *Cache[V]) Get(ctx context.Context, key string) (Result[V], error) {
 		defer cancel()
 		v, err := c.load(loadCtx, key)
 		if err != nil {
+			c.markFailed(key)
 			return nil, err
 		}
 		e := entry[V]{value: v, fetchedAt: c.now()}
@@ -123,6 +140,17 @@ func (c *Cache[V]) store(key string, e entry[V]) {
 		c.evictLocked()
 	}
 	c.items[key] = e
+}
+
+// markFailed starts the error backoff for an existing entry. Keys that were
+// never loaded have nothing stale to serve, so their errors are not remembered.
+func (c *Cache[V]) markFailed(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e, ok := c.items[key]; ok {
+		e.failedAt = c.now()
+		c.items[key] = e
+	}
 }
 
 // evictLocked drops expired entries, or the oldest one if none expired.

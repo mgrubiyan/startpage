@@ -6,8 +6,10 @@ A self-hosted browser start page with a Go backend: search with live suggestions
 bookmarks, clock, weather, Central Bank of Russia exchange rates and an uptime
 monitor for your own services (Telegram bots, APIs, anything with an HTTP endpoint).
 
-The frontend is plain HTML/CSS/JS embedded into the binary. Everything it shows
-comes from the Go JSON API; the browser never talks to third-party APIs directly.
+The frontend is plain HTML/CSS/JS embedded into the binary. All data comes from
+the Go JSON API; the browser doesn't call third-party APIs. The one exception is
+bookmark icons, which load from Google's favicon service, so bookmark hostnames
+are visible to Google.
 
 ## Features
 
@@ -50,6 +52,10 @@ patterns, `log/slog`). Third-party dependencies are `pgx/v5`,
   timeout), so one impatient client can't cancel a fetch that other waiters share.
 - Errors are never cached. If a refresh fails while an expired value exists, the stale value
   is served with `"stale": true` and the UI marks it.
+- After a failed refresh, the stale value is served immediately for 30s, so a dead upstream
+  doesn't make every request wait out the timeout.
+- Suggestions give each provider its own timeout, so a hanging Google still leaves time for
+  the DuckDuckGo fallback.
 - Entry count is bounded; weather is keyed by city, suggestions by query.
 
 **Auth.**
@@ -59,6 +65,10 @@ patterns, `log/slog`). Third-party dependencies are `pgx/v5`,
   Expired sessions are pruned on login.
 - Login is rate-limited per client IP (5/min). `X-Forwarded-For` is honoured only with
   `STARTPAGE_TRUST_PROXY=true`, and then only its last entry, which the proxy appended.
+  Never enable it while the app port is reachable directly, because clients could then pick
+  their own IP. The limiter tracks at most 10k clients; past that it refuses new ones rather
+  than grow.
+- API responses carry `Cache-Control: no-store`.
 - Routes are declared in one table with an explicit `public` flag. A test walks that table and
   asserts that every private route returns 401 without a valid cookie, so a new endpoint can't
   ship unauthenticated by accident.
@@ -143,7 +153,7 @@ make run        # password: correct-horse (override with STARTPAGE_PASSWORD)
 | Variable | Default | |
 |---|---|---|
 | `DATABASE_URL` | (required) | Postgres connection string |
-| `STARTPAGE_PASSWORD` | (required) | login password, at least 8 characters |
+| `STARTPAGE_PASSWORD` | (required) | login password, 8 to 72 bytes |
 | `STARTPAGE_ADDR` | `:8080` | listen address |
 | `STARTPAGE_SECURE_COOKIE` | `false` | set `true` behind HTTPS |
 | `STARTPAGE_TRUST_PROXY` | `false` | use the last `X-Forwarded-For` entry as client IP |

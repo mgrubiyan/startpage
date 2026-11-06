@@ -90,13 +90,15 @@ func New(d Deps) http.Handler {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz(d.Ping))
-	mux.Handle("/api/", chain(jsonMuxErrors(apiMux), requireJSON))
+	mux.Handle("/api/", chain(jsonMuxErrors(apiMux), noStore, requireJSON))
 	// "/" rather than "GET /": the latter conflicts with the method-less "/api/" pattern.
 	mux.Handle("/", readOnly(http.FileServerFS(d.Static)))
 
+	// logRequests sits outside recoverPanics so a panicking request still gets
+	// its access-log line (with the 500 that recoverPanics writes).
 	return chain(mux,
-		recoverPanics(d.Logger),
 		logRequests(d.Logger),
+		recoverPanics(d.Logger),
 		securityHeaders,
 	)
 }

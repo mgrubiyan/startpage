@@ -100,6 +100,15 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// noStore keeps API responses (bookmarks, service URLs, sessions) out of browser
+// and proxy caches; static assets stay cacheable.
+func noStore(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // jsonMuxErrors makes the mux's own 404/405 responses JSON like every other API error,
 // while keeping its routing decision (including the Allow header on 405).
 func jsonMuxErrors(mux *http.ServeMux) http.Handler {

@@ -127,6 +127,8 @@ func run() error {
 			return fmt.Errorf("http server: %w", err)
 		}
 	case <-ctx.Done():
+		// Restore default signal handling: a second Ctrl-C kills a stuck drain.
+		stop()
 		logger.Info("shutting down")
 	}
 

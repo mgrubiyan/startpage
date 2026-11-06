@@ -58,7 +58,7 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 	}
 	var in loginInput
 	if err := decodeJSON(w, r, &in); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		badBody(w, err)
 		return
 	}
 	token, expires, err := a.auth.Login(r.Context(), in.Password)

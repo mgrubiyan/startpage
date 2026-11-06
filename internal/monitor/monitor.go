@@ -194,7 +194,9 @@ func (m *Monitor) probe(ctx context.Context, svc store.Service) store.Check {
 func (m *Monitor) prune(ctx context.Context) {
 	n, err := m.store.PruneChecks(ctx, time.Now().Add(-m.cfg.Retention))
 	if err != nil {
-		m.logger.Error("monitor: prune checks", "err", err)
+		if ctx.Err() == nil { // a prune cut short by shutdown is not an error
+			m.logger.Error("monitor: prune checks", "err", err)
+		}
 		return
 	}
 	if n > 0 {

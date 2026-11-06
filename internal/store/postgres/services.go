@@ -79,7 +79,9 @@ func (s *Store) RecordChecks(ctx context.Context, checks []store.Check) error {
 		SELECT c.service_id, c.checked_at, c.ok, c.status_code, c.latency_ms, c.error
 		FROM unnest($1::bigint[], $2::timestamptz[], $3::boolean[], $4::integer[], $5::integer[], $6::text[])
 			AS c(service_id, checked_at, ok, status_code, latency_ms, error)
-		WHERE EXISTS (SELECT 1 FROM services s WHERE s.id = c.service_id)
+		-- FOR KEY SHARE: a service deleted mid-round is skipped instead of failing
+		-- the whole batch on the foreign key.
+		WHERE EXISTS (SELECT 1 FROM services s WHERE s.id = c.service_id FOR KEY SHARE)
 		ON CONFLICT (service_id, checked_at) DO NOTHING`,
 		ids, times, oks, codes, latencies, errs)
 	if err != nil {

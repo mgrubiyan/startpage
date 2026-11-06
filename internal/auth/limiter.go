@@ -39,6 +39,12 @@ func (l *Limiter) Allow(key string) bool {
 	if !ok || now.Sub(b.start) >= l.window {
 		if !ok && len(l.hits) >= maxTrackedKeys {
 			l.sweepLocked(now)
+			// Still full: thousands of distinct clients inside one window is an
+			// attack (e.g. rotating X-Forwarded-For), so fail closed for new keys
+			// rather than grow without bound.
+			if len(l.hits) >= maxTrackedKeys {
+				return false
+			}
 		}
 		l.hits[key] = bucket{count: 1, start: now}
 		return true

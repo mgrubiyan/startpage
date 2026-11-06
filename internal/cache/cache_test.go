@@ -80,11 +80,25 @@ func TestFailureServesStaleAndIsNotCached(t *testing.T) {
 		t.Fatalf("stale fallback = %+v, %v", r, err)
 	}
 
-	// The failure must not have refreshed the entry: the next call retries upstream.
+	// Within the error backoff the stale value is served without touching upstream.
+	clock.Advance(10 * time.Second)
+	r, err = c.Get(context.Background(), "k")
+	if err != nil || !r.Stale || r.Value != 42 || calls.Load() != 2 {
+		t.Fatalf("inside backoff = %+v, %v, calls=%d; want stale with no new load", r, err, calls.Load())
+	}
+
+	// The failure must not have refreshed the entry: after the backoff the next call retries.
 	fail.Store(false)
+	clock.Advance(30 * time.Second)
 	r, err = c.Get(context.Background(), "k")
 	if err != nil || r.Stale || calls.Load() != 3 {
 		t.Fatalf("after recovery = %+v, %v, calls=%d", r, err, calls.Load())
+	}
+
+	// A successful refresh clears the backoff: once expired again, it reloads at once.
+	clock.Advance(2 * time.Minute)
+	if _, err := c.Get(context.Background(), "k"); err != nil || calls.Load() != 4 {
+		t.Fatalf("backoff not cleared by success: calls=%d, %v", calls.Load(), err)
 	}
 
 	fail.Store(true)

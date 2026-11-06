@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/mgrubiyan/startpage/internal/fetch"
 )
@@ -27,6 +28,14 @@ type provider struct {
 type Client struct {
 	http      *http.Client
 	providers []provider
+	timeout   time.Duration // per provider; zero means ProviderTimeout
+}
+
+func (c *Client) providerTimeout() time.Duration {
+	if c.timeout > 0 {
+		return c.timeout
+	}
+	return ProviderTimeout
 }
 
 // New returns a Client with Google as primary and DuckDuckGo as fallback.
@@ -42,11 +51,17 @@ func New(hc *http.Client) *Client {
 	}}
 }
 
+// ProviderTimeout bounds each provider separately, so a hanging primary leaves
+// time for the fallback within the caller's overall deadline.
+const ProviderTimeout = 1500 * time.Millisecond
+
 // Suggest returns up to MaxResults suggestions for q.
 func (c *Client) Suggest(ctx context.Context, q string) ([]string, error) {
 	var errs []error
 	for _, p := range c.providers {
-		out, err := c.query(ctx, p, q)
+		pctx, cancel := context.WithTimeout(ctx, c.providerTimeout())
+		out, err := c.query(pctx, p, q)
+		cancel()
 		if err == nil {
 			return out, nil
 		}

@@ -21,7 +21,10 @@ type Config struct {
 	LogLevel        slog.Level
 }
 
-const minPasswordLen = 8
+const (
+	minPasswordLen   = 8
+	maxPasswordBytes = 72 // bcrypt rejects longer inputs
+)
 
 // Load builds a Config from getenv (os.Getenv in production, a map lookup in tests).
 func Load(getenv func(string) string) (Config, error) {
@@ -35,8 +38,11 @@ func Load(getenv func(string) string) (Config, error) {
 	if cfg.DatabaseURL == "" {
 		errs = append(errs, errors.New("DATABASE_URL is required"))
 	}
-	if len(cfg.Password) < minPasswordLen {
+	switch {
+	case len(cfg.Password) < minPasswordLen:
 		errs = append(errs, fmt.Errorf("STARTPAGE_PASSWORD must be at least %d characters", minPasswordLen))
+	case len(cfg.Password) > maxPasswordBytes:
+		errs = append(errs, fmt.Errorf("STARTPAGE_PASSWORD must be at most %d bytes (bcrypt limit)", maxPasswordBytes))
 	}
 
 	var err error

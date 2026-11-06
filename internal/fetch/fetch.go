@@ -53,5 +53,7 @@ func JSON(ctx context.Context, client *http.Client, rawURL string, dst any) erro
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBodyBytes)).Decode(dst); err != nil {
 		return fmt.Errorf("decode %s: %w", req.URL.Redacted(), err)
 	}
+	// Read any trailing bytes (e.g. a final newline) so the connection is reused.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 	return nil
 }

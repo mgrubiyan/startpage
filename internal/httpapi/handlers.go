@@ -106,7 +106,7 @@ func (a *api) getSettings(w http.ResponseWriter, r *http.Request) {
 func (a *api) putSettings(w http.ResponseWriter, r *http.Request) {
 	var in settingsDTO
 	if err := decodeJSON(w, r, &in); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		badBody(w, err)
 		return
 	}
 	if !searchEngines[in.SearchEngine] {
@@ -144,7 +144,7 @@ func (a *api) listBookmarks(w http.ResponseWriter, r *http.Request) {
 func (a *api) createBookmark(w http.ResponseWriter, r *http.Request) {
 	var in bookmarkInput
 	if err := decodeJSON(w, r, &in); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		badBody(w, err)
 		return
 	}
 	title, err := cleanText(in.Title, 40)
@@ -205,7 +205,7 @@ func (a *api) listServices(w http.ResponseWriter, r *http.Request) {
 func (a *api) createService(w http.ResponseWriter, r *http.Request) {
 	var in serviceInput
 	if err := decodeJSON(w, r, &in); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		badBody(w, err)
 		return
 	}
 	name, err := cleanText(in.Name, 60)
