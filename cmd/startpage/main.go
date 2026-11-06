@@ -14,6 +14,7 @@ import (
 
 	"github.com/mgrubiyan/startpage/internal/config"
 	"github.com/mgrubiyan/startpage/internal/httpapi"
+	"github.com/mgrubiyan/startpage/internal/store/postgres"
 	"github.com/mgrubiyan/startpage/web"
 )
 
@@ -36,10 +37,22 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	openCtx, cancelOpen := context.WithTimeout(ctx, 30*time.Second)
+	db, err := postgres.Open(openCtx, cfg.DatabaseURL)
+	cancelOpen()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if err := db.Migrate(ctx); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+
 	handler := httpapi.New(httpapi.Deps{
 		Logger: logger,
 		Static: web.Static(),
-		Ping:   func(context.Context) error { return nil },
+		Store:  db,
+		Ping:   db.Ping,
 	})
 
 	srv := &http.Server{

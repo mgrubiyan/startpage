@@ -14,16 +14,37 @@ import (
 type Deps struct {
 	Logger *slog.Logger
 	Static fs.FS
+	Store  Store
 	// Ping reports whether the service can reach its database.
 	Ping func(ctx context.Context) error
+	// Now is the clock; nil means time.Now.
+	Now func() time.Time
+	// OnServicesChanged is called after a service is added or removed; may be nil.
+	OnServicesChanged func()
 }
 
 // New builds the root handler.
 func New(d Deps) http.Handler {
-	mux := http.NewServeMux()
+	if d.Now == nil {
+		d.Now = time.Now
+	}
+	a := &api{store: d.Store, logger: d.Logger, now: d.Now, onServicesChanged: d.OnServicesChanged}
 
+	apiMux := http.NewServeMux()
+	apiMux.HandleFunc("GET /api/settings", a.getSettings)
+	apiMux.HandleFunc("PUT /api/settings", a.putSettings)
+	apiMux.HandleFunc("GET /api/bookmarks", a.listBookmarks)
+	apiMux.HandleFunc("POST /api/bookmarks", a.createBookmark)
+	apiMux.HandleFunc("DELETE /api/bookmarks/{id}", a.deleteBookmark)
+	apiMux.HandleFunc("GET /api/services", a.listServices)
+	apiMux.HandleFunc("POST /api/services", a.createService)
+	apiMux.HandleFunc("DELETE /api/services/{id}", a.deleteService)
+
+	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz(d.Ping))
-	mux.Handle("GET /", http.FileServerFS(d.Static))
+	mux.Handle("/api/", chain(jsonMuxErrors(apiMux), requireJSON))
+	// "/" rather than "GET /": the latter conflicts with the method-less "/api/" pattern.
+	mux.Handle("/", readOnly(http.FileServerFS(d.Static)))
 
 	return chain(mux,
 		recoverPanics(d.Logger),

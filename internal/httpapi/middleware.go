@@ -5,6 +5,7 @@ import (
 	"mime"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 )
 
@@ -95,6 +96,61 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Frame-Options", "DENY")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// jsonMuxErrors makes the mux's own 404/405 responses JSON like every other API error,
+// while keeping its routing decision (including the Allow header on 405).
+func jsonMuxErrors(mux *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h, pattern := mux.Handler(r)
+		if pattern != "" {
+			mux.ServeHTTP(w, r) // sets r.PathValue
+			return
+		}
+		capture := &statusCapture{header: http.Header{}}
+		h.ServeHTTP(capture, r)
+		if allow := capture.header.Get("Allow"); allow != "" {
+			w.Header().Set("Allow", allow)
+		}
+		status := capture.status
+		if status == 0 {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, strings.ToLower(http.StatusText(status)))
+	})
+}
+
+// statusCapture records headers and status and discards the body.
+type statusCapture struct {
+	header http.Header
+	status int
+}
+
+func (c *statusCapture) Header() http.Header { return c.header }
+
+func (c *statusCapture) Write(b []byte) (int, error) {
+	if c.status == 0 {
+		c.status = http.StatusOK
+	}
+	return len(b), nil
+}
+
+func (c *statusCapture) WriteHeader(status int) {
+	if c.status == 0 {
+		c.status = status
+	}
+}
+
+// readOnly allows only GET and HEAD, for static content.
+func readOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
