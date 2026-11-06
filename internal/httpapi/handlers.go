@@ -77,7 +77,7 @@ type api struct {
 
 	secureCookie bool
 	trustProxy   bool
-	now    func() time.Time
+	now          func() time.Time
 	// onServicesChanged lets the monitor check a new service right away instead of waiting a tick.
 	onServicesChanged func()
 }

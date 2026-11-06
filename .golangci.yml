@@ -1,0 +1,36 @@
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - errorlint
+    - gocritic
+    - gosec
+    - misspell
+    - noctx
+    - unconvert
+    - unparam
+  settings:
+    gosec:
+      excludes:
+        # The monitor and upstream clients fetch URLs by design; targets are
+        # configured by the authenticated owner (see README, "Monitor and SSRF").
+        - G107
+        - G704
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - noctx
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/mgrubiyan/startpage

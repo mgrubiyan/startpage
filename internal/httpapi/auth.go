@@ -87,7 +87,8 @@ func (a *api) logout(w http.ResponseWriter, r *http.Request) {
 
 // cookie builds the session cookie; maxAge < 0 deletes it.
 func (a *api) cookie(value string, maxAge int) *http.Cookie {
-	return &http.Cookie{
+	// Secure comes from STARTPAGE_SECURE_COOKIE: it must be off for plain-HTTP localhost.
+	return &http.Cookie{ //nolint:gosec // G124: Secure is config-driven, HttpOnly and SameSite are set
 		Name:     sessionCookie,
 		Value:    value,
 		Path:     "/",
