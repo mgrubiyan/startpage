@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
 
+	"github.com/mgrubiyan/startpage/internal/auth"
 	"github.com/mgrubiyan/startpage/internal/cache"
 	"github.com/mgrubiyan/startpage/internal/rates"
 	"github.com/mgrubiyan/startpage/internal/store"
@@ -143,8 +145,43 @@ func (f *fakeSource[V]) Get(_ context.Context, key string) (cache.Result[V], err
 	return cache.Result[V]{Value: f.value, FetchedAt: testNow, Stale: f.stale}, nil
 }
 
+const testToken = "valid-test-session"
+
+// fakeAuth accepts password "correct-horse" and issues sequential tokens.
+type fakeAuth struct {
+	mu       sync.Mutex
+	sessions map[string]bool
+	issued   int
+}
+
+func (f *fakeAuth) Login(_ context.Context, password string) (string, time.Time, error) {
+	if password != "correct-horse" {
+		return "", time.Time{}, auth.ErrInvalidPassword
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.issued++
+	tok := "issued-" + strconv.Itoa(f.issued)
+	f.sessions[tok] = true
+	return tok, testNow.Add(time.Hour), nil
+}
+
+func (f *fakeAuth) Authenticate(_ context.Context, token string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.sessions[token], nil
+}
+
+func (f *fakeAuth) Logout(_ context.Context, token string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.sessions, token)
+	return nil
+}
+
 type testEnv struct {
 	handler        http.Handler
+	auth           *fakeAuth
 	store          *fakeStore
 	weather        *fakeSource[weather.Report]
 	rates          *fakeSource[rates.Rates]
@@ -153,29 +190,48 @@ type testEnv struct {
 	pingErr        error
 }
 
-func newTestEnv(t *testing.T) *testEnv {
+func newTestEnv(t *testing.T, opts ...func(*Deps)) *testEnv {
 	t.Helper()
 	env := &testEnv{
+		auth:    &fakeAuth{sessions: map[string]bool{testToken: true}},
 		store:   newFakeStore(),
 		weather: &fakeSource[weather.Report]{},
 		rates:   &fakeSource[rates.Rates]{},
 		suggest: &fakeSource[[]string]{value: []string{}},
 	}
-	env.handler = New(Deps{
+	d := Deps{
 		Logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Static:            fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>t</title>")}},
 		Store:             env.store,
 		Weather:           env.weather,
 		Rates:             env.rates,
 		Suggest:           env.suggest,
+		Auth:              env.auth,
+		LoginLimiter:      auth.NewLimiter(5, time.Minute),
 		Ping:              func(context.Context) error { return env.pingErr },
 		Now:               func() time.Time { return testNow },
 		OnServicesChanged: func() { env.servicesChange++ },
-	})
+	}
+	for _, opt := range opts {
+		opt(&d)
+	}
+	env.handler = New(d)
 	return env
 }
 
+// do sends an authenticated request.
 func (e *testEnv) do(t *testing.T, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	return e.send(t, method, path, body, &http.Cookie{Name: sessionCookie, Value: testToken})
+}
+
+// doAnon sends a request without a session cookie.
+func (e *testEnv) doAnon(t *testing.T, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	return e.send(t, method, path, body, nil)
+}
+
+func (e *testEnv) send(t *testing.T, method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
 	var r io.Reader
 	if body != "" {
@@ -184,6 +240,9 @@ func (e *testEnv) do(t *testing.T, method, path, body string) *httptest.Response
 	req := httptest.NewRequest(method, path, r)
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if cookie != nil {
+		req.AddCookie(cookie)
 	}
 	rec := httptest.NewRecorder()
 	e.handler.ServeHTTP(rec, req)
@@ -249,6 +308,7 @@ func TestMutationsRequireJSONContentType(t *testing.T) {
 	env := newTestEnv(t)
 	for _, ct := range []string{"", "text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x"} {
 		req := httptest.NewRequest("POST", "/api/bookmarks", strings.NewReader(`{"title":"x","url":"https://go.dev"}`))
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: testToken})
 		if ct != "" {
 			req.Header.Set("Content-Type", ct)
 		}

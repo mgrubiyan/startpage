@@ -71,7 +71,12 @@ type api struct {
 	weather WeatherSource
 	rates   RatesSource
 	suggest SuggestSource
+	auth    Authenticator
+	limiter RateLimiter
 	logger  *slog.Logger
+
+	secureCookie bool
+	trustProxy   bool
 	now    func() time.Time
 	// onServicesChanged lets the monitor check a new service right away instead of waiting a tick.
 	onServicesChanged func()

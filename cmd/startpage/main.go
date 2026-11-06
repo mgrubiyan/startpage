@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mgrubiyan/startpage/internal/auth"
 	"github.com/mgrubiyan/startpage/internal/cache"
 	"github.com/mgrubiyan/startpage/internal/config"
 	"github.com/mgrubiyan/startpage/internal/fetch"
@@ -68,6 +69,11 @@ func run() error {
 		<-monitorDone
 	}()
 
+	authService, err := auth.New(cfg.Password, db, cfg.SessionTTL)
+	if err != nil {
+		return err
+	}
+
 	upstream := fetch.NewClient()
 	weatherClient := weather.New(upstream)
 	ratesClient := rates.New(upstream)
@@ -83,6 +89,10 @@ func run() error {
 			return ratesClient.Latest(ctx)
 		}),
 		Suggest:           cache.New(time.Hour, suggestClient.Suggest, cache.WithLoadTimeout(3*time.Second)),
+		Auth:              authService,
+		LoginLimiter:      auth.NewLimiter(5, time.Minute),
+		SecureCookie:      cfg.SecureCookie,
+		TrustProxy:        cfg.TrustProxy,
 		OnServicesChanged: mon.Trigger,
 	})
 

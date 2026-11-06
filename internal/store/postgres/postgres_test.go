@@ -171,6 +171,46 @@ func TestBookmarksCRUD(t *testing.T) {
 	}
 }
 
+func TestSessions(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	live := bytes32(1)
+	expired := bytes32(2)
+	if err := s.CreateSession(ctx, live, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateSession(ctx, expired, now.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.SessionValid(ctx, live, now); err != nil || !ok {
+		t.Fatalf("live session = %v, %v", ok, err)
+	}
+	if ok, _ := s.SessionValid(ctx, expired, now); ok {
+		t.Fatal("expired session reported valid")
+	}
+	if n, err := s.PruneSessions(ctx, now); err != nil || n != 1 {
+		t.Fatalf("PruneSessions = %d, %v", n, err)
+	}
+	if err := s.DeleteSession(ctx, live); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := s.SessionValid(ctx, live, now); ok {
+		t.Fatal("deleted session reported valid")
+	}
+	if err := s.CreateSession(ctx, []byte("short"), now.Add(time.Hour)); err == nil {
+		t.Fatal("non-SHA-256 token hash must violate CHECK constraint")
+	}
+}
+
+func bytes32(b byte) []byte {
+	out := make([]byte, 32)
+	out[0] = b
+	return out
+}
+
 func TestServiceStatusesAndRetention(t *testing.T) {
 	t.Parallel()
 	s := newTestStore(t)
