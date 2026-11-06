@@ -231,6 +231,32 @@ func (e *testEnv) doAnon(t *testing.T, method, path, body string) *httptest.Resp
 	return e.send(t, method, path, body, nil)
 }
 
+// A cross-site form can't send application/json; real routes refuse anything
+// else (CSRF defence), while unknown paths still answer 404 rather than 415.
+func TestFormPostsRejected(t *testing.T) {
+	env := newTestEnv(t)
+	for _, tt := range []struct {
+		path string
+		want int
+	}{
+		{"/api/bookmarks", http.StatusUnsupportedMediaType},
+		{"/api/logout", http.StatusUnsupportedMediaType},
+		{"/api/nope", http.StatusNotFound},
+	} {
+		req := httptest.NewRequest("POST", tt.path, strings.NewReader("title=x&url=https://evil.example"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: testToken})
+		rec := httptest.NewRecorder()
+		env.handler.ServeHTTP(rec, req)
+		if rec.Code != tt.want {
+			t.Errorf("POST %s as form = %d, want %d", tt.path, rec.Code, tt.want)
+		}
+	}
+	if n := len(env.store.bookmarks); n != 1 {
+		t.Fatalf("form post changed the store: %d bookmarks", n)
+	}
+}
+
 func (e *testEnv) send(t *testing.T, method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
 	var r io.Reader

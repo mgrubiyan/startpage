@@ -126,6 +126,8 @@ func TestWorkersBoundConcurrency(t *testing.T) {
 				break
 			}
 		}
+		// Hold the request so concurrency can build up. The assertion below is an
+		// upper bound, so a slow machine can only make the test weaker, never flaky.
 		time.Sleep(30 * time.Millisecond)
 		inFlight.Add(-1)
 	}))

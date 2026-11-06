@@ -109,9 +109,11 @@ func TestFailureServesStaleAndIsNotCached(t *testing.T) {
 
 func TestConcurrentMissesShareOneLoad(t *testing.T) {
 	release := make(chan struct{})
+	entered := make(chan struct{}, 64) // room for extra calls, so a regression fails instead of hanging
 	var calls atomic.Int32
 	c := New(time.Minute, func(context.Context, string) (int, error) {
 		calls.Add(1)
+		entered <- struct{}{}
 		<-release
 		return 7, nil
 	})
@@ -130,8 +132,10 @@ func TestConcurrentMissesShareOneLoad(t *testing.T) {
 			errs <- err
 		}()
 	}
-	// Let the goroutines pile up on the in-flight load before releasing it.
-	time.Sleep(50 * time.Millisecond)
+	// Release once the load is in flight. Callers that arrive later either join
+	// it or, if it already finished, hit the fresh entry (re-checked inside the
+	// singleflight call), so exactly one load is guaranteed either way.
+	<-entered
 	close(release)
 	wg.Wait()
 	close(errs)
@@ -147,7 +151,11 @@ func TestConcurrentMissesShareOneLoad(t *testing.T) {
 
 func TestCallerCancelDoesNotAbortSharedLoad(t *testing.T) {
 	release := make(chan struct{})
+	entered := make(chan struct{}, 2)
+	var calls atomic.Int32
 	c := New(time.Minute, func(ctx context.Context, _ string) (string, error) {
+		calls.Add(1)
+		entered <- struct{}{}
 		select {
 		case <-release:
 			return "done", nil
@@ -162,21 +170,26 @@ func TestCallerCancelDoesNotAbortSharedLoad(t *testing.T) {
 		_, err := c.Get(ctx, "k")
 		firstDone <- err
 	}()
-	time.Sleep(20 * time.Millisecond)
+	<-entered // the load is in flight
 	cancel()
 	if err := <-firstDone; !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled caller got %v", err)
 	}
 
+	// Whether the second caller joins the in-flight load or arrives after it
+	// stored its value, a load that survived the cancel means exactly one call.
+	// Had it died with the first caller, a second load would be needed.
 	secondDone := make(chan string, 1)
 	go func() {
 		r, _ := c.Get(context.Background(), "k")
 		secondDone <- r.Value
 	}()
-	time.Sleep(20 * time.Millisecond)
 	close(release)
 	if v := <-secondDone; v != "done" {
-		t.Fatalf("second caller got %q: the shared load died with the first caller", v)
+		t.Fatalf("second caller got %q", v)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("loader called %d times: the shared load died with the cancelled caller", n)
 	}
 }
 

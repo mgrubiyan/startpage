@@ -106,6 +106,10 @@ func (c *Cache[V]) Get(ctx context.Context, key string) (Result[V], error) {
 	// so it runs on a detached context with its own timeout; each caller still
 	// stops waiting when its own ctx is done.
 	ch := c.group.DoChan(key, func() (any, error) {
+		// Another load may have finished between our cache read and DoChan.
+		if e, ok := c.fresh(key); ok {
+			return e, nil
+		}
 		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.loadTimeout)
 		defer cancel()
 		v, err := c.load(loadCtx, key)
@@ -140,6 +144,13 @@ func (c *Cache[V]) store(key string, e entry[V]) {
 		c.evictLocked()
 	}
 	c.items[key] = e
+}
+
+func (c *Cache[V]) fresh(key string) (entry[V], bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.items[key]
+	return e, ok && c.now().Sub(e.fetchedAt) < c.ttl
 }
 
 // markFailed starts the error backoff for an existing entry. Keys that were

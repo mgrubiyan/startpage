@@ -85,12 +85,14 @@ func New(d Deps) http.Handler {
 		if !rt.public {
 			h = a.requireAuth(h)
 		}
-		apiMux.HandleFunc(rt.pattern, h)
+		// Per route rather than around the mux, so an unknown path is a 404,
+		// not a 415 for the wrong content type.
+		apiMux.Handle(rt.pattern, requireJSON(h))
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz(d.Ping))
-	mux.Handle("/api/", chain(jsonMuxErrors(apiMux), noStore, requireJSON))
+	mux.Handle("/api/", chain(jsonMuxErrors(apiMux), noStore))
 	// "/" rather than "GET /": the latter conflicts with the method-less "/api/" pattern.
 	mux.Handle("/", readOnly(http.FileServerFS(d.Static)))
 
