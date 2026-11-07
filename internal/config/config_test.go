@@ -100,6 +100,15 @@ func TestDemoNeedsNoPassword(t *testing.T) {
 		t.Fatal("Demo = false, want true")
 	}
 
+	// A password marks a real instance: turning it into a public demo must fail loudly.
+	if _, err := Load(env(map[string]string{
+		"DATABASE_URL":       "postgres://db/startpage",
+		"STARTPAGE_DEMO":     "true",
+		"STARTPAGE_PASSWORD": "correct-horse",
+	})); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("demo with password: err = %v", err)
+	}
+
 	// Without the flag the same environment must still fail on the password.
 	if _, err := Load(env(map[string]string{"DATABASE_URL": "postgres://db/startpage"})); err == nil ||
 		!strings.Contains(err.Error(), "STARTPAGE_PASSWORD") {

@@ -123,7 +123,10 @@ before doing so.
 - Because nobody can add services, the SSRF concern above doesn't apply. On an empty database
   the demo seeds its own monitor targets (`internal/demo`), including one that is always down.
 - Search suggestions are limited to 60 requests per minute per IP, so the demo can't be used as
-  a free suggestions proxy.
+  a free suggestions proxy. Behind a reverse proxy, set `STARTPAGE_TRUST_PROXY=true` (and keep
+  the app port private), or every visitor shares the proxy's IP and one limit.
+- `STARTPAGE_DEMO` together with `STARTPAGE_PASSWORD` is a config error, so a real instance
+  can't be turned into a public one by flipping a flag.
 - The frontend reads `GET /api/meta`, shows a banner and hides the edit controls.
 
 Run the demo as a separate instance with its own database, never against your real data.
@@ -174,7 +177,7 @@ make run-demo   # the same, in read-only demo mode
 | Variable | Default | |
 |---|---|---|
 | `DATABASE_URL` | (required) | Postgres connection string |
-| `STARTPAGE_PASSWORD` | (required) | login password, 8 to 72 bytes; not used in demo mode |
+| `STARTPAGE_PASSWORD` | (required) | login password, 8 to 72 bytes; must be unset in demo mode |
 | `STARTPAGE_DEMO` | `false` | public read-only demo, see [Demo mode](#demo-mode) |
 | `STARTPAGE_ADDR` | `:8080` | listen address |
 | `STARTPAGE_SECURE_COOKIE` | `false` | set `true` behind HTTPS |

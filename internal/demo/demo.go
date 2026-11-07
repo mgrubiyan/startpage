@@ -30,8 +30,10 @@ func Services(selfURL string) []store.Service {
 	}
 }
 
-// Seed adds the demo services when none exist yet. It is a no-op on restart, so
-// it never duplicates rows. Bookmarks need no seeding: the first migration adds them.
+// Seed adds the demo services when none exist yet, so a restart doesn't duplicate
+// them. It is meant for one instance per database: two starting at the same moment
+// on an empty database could both seed. Bookmarks need no seeding: the first
+// migration adds them.
 func Seed(ctx context.Context, s Store, selfURL string) error {
 	existing, err := s.Services(ctx)
 	if err != nil {

@@ -45,6 +45,10 @@ func Load(getenv func(string) string) (Config, error) {
 		errs = append(errs, err)
 	}
 	switch {
+	case cfg.Demo && cfg.Password != "":
+		// A password means this was meant to be a real instance; flipping it to demo
+		// would publish its bookmarks, settings and services. Refuse instead.
+		errs = append(errs, errors.New("STARTPAGE_DEMO and STARTPAGE_PASSWORD are mutually exclusive: a demo has no login, so run it as a separate instance"))
 	case cfg.Demo:
 		// No login in demo mode, so no password to check.
 	case len(cfg.Password) < minPasswordLen:

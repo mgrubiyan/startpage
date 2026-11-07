@@ -452,7 +452,7 @@ async function loadMeta() {
     const meta = await api('/api/meta');
     document.body.classList.toggle('demo', meta.demo);
     $('demo-banner').hidden = !meta.demo;
-  } catch { /* old server or network error: behave as a normal instance */ }
+  } catch { /* unknown mode: show the normal UI; a demo server still refuses writes */ }
 }
 
 async function boot() {

@@ -66,6 +66,17 @@ func run() error {
 		return fmt.Errorf("migrate: %w", err)
 	}
 
+	// Seed before the monitor starts, so its first round already probes the demo services.
+	if cfg.Demo {
+		selfURL, err := localURL(cfg.Addr)
+		if err != nil {
+			return err
+		}
+		if err := demo.Seed(ctx, db, selfURL); err != nil {
+			return err
+		}
+	}
+
 	mon := monitor.New(db, logger, monitor.Config{Interval: cfg.MonitorInterval})
 	monitorCtx, stopMonitor := context.WithCancel(ctx)
 	monitorDone := make(chan struct{})
@@ -80,20 +91,16 @@ func run() error {
 		<-monitorDone
 	}()
 
-	// Demo mode has no login: leave Auth nil (the API never calls it then), seed
-	// monitor targets on an empty database and throttle the public suggestions proxy.
+	// Demo mode has no login: leave Auth nil (the API never calls it then) and
+	// throttle the public suggestions proxy.
 	var authService httpapi.Authenticator
 	var suggestLimiter httpapi.RateLimiter
 	if cfg.Demo {
-		selfURL, err := localURL(cfg.Addr)
-		if err != nil {
-			return err
-		}
-		if err := demo.Seed(ctx, db, selfURL); err != nil {
-			return err
-		}
 		suggestLimiter = auth.NewLimiter(60, time.Minute)
 		logger.Info("demo mode: read-only, no login")
+		if !cfg.TrustProxy {
+			logger.Warn("demo mode without STARTPAGE_TRUST_PROXY: behind a reverse proxy all visitors share one suggestions rate limit")
+		}
 	} else {
 		svc, err := auth.New(cfg.Password, db, cfg.SessionTTL)
 		if err != nil {

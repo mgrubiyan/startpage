@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/mgrubiyan/startpage/internal/auth"
+	"github.com/mgrubiyan/startpage/internal/store"
 )
 
 func demoEnv(t *testing.T) *testEnv {
@@ -21,6 +22,8 @@ func demoEnv(t *testing.T) *testEnv {
 // session and every write, login included, is refused without touching the store.
 func TestDemoModeIsReadOnly(t *testing.T) {
 	env := demoEnv(t)
+	// One existing service, so a leaked DELETE /api/services/1 would have something to remove.
+	env.store.statuses = []store.ServiceStatus{{Service: store.Service{ID: 1, Name: "bot", URL: "https://bot.example"}}}
 	before := env.store.settings
 	var reads, writes int
 	for _, rt := range (&api{}).routes() {
@@ -52,9 +55,10 @@ func TestDemoModeIsReadOnly(t *testing.T) {
 	if reads < 6 || writes < 7 {
 		t.Fatalf("route table changed shape: %d reads, %d writes", reads, writes)
 	}
-	if len(env.store.bookmarks) != 1 || env.store.settings != before || env.servicesChange != 0 {
-		t.Fatalf("demo writes changed state: %d bookmarks, settings %+v, %d service changes",
-			len(env.store.bookmarks), env.store.settings, env.servicesChange)
+	if len(env.store.bookmarks) != 1 || env.store.settings != before ||
+		len(env.store.statuses) != 1 || env.servicesChange != 0 {
+		t.Fatalf("demo writes changed state: %d bookmarks, settings %+v, %d services, %d service changes",
+			len(env.store.bookmarks), env.store.settings, len(env.store.statuses), env.servicesChange)
 	}
 }
 
