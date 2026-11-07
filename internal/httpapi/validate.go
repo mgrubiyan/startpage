@@ -42,5 +42,11 @@ func cleanURL(raw string) (string, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return "", errors.New("must be an absolute http or https URL")
 	}
-	return u.String(), nil
+	// Normalising percent-encodes non-ASCII text (one Cyrillic letter becomes six
+	// characters), so check the stored form too, as the database counts it.
+	clean := u.String()
+	if utf8.RuneCountInString(clean) > maxURLLen {
+		return "", fmt.Errorf("must be at most %d characters once encoded", maxURLLen)
+	}
+	return clean, nil
 }

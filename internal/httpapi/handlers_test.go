@@ -149,9 +149,10 @@ const testToken = "valid-test-session"
 
 // fakeAuth accepts password "correct-horse" and issues sequential tokens.
 type fakeAuth struct {
-	mu       sync.Mutex
-	sessions map[string]bool
-	issued   int
+	mu        sync.Mutex
+	sessions  map[string]bool
+	issued    int
+	logoutErr error
 }
 
 func (f *fakeAuth) Login(_ context.Context, password string) (string, time.Time, error) {
@@ -175,6 +176,9 @@ func (f *fakeAuth) Authenticate(_ context.Context, token string) (bool, error) {
 func (f *fakeAuth) Logout(_ context.Context, token string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.logoutErr != nil {
+		return f.logoutErr
+	}
 	delete(f.sessions, token)
 	return nil
 }
@@ -389,10 +393,15 @@ func TestServicesReportUptimeAndNotifyMonitor(t *testing.T) {
 	}
 
 	env.do(t, "POST", "/api/services", `{"name":"x","url":"https://x.dev"}`)
-	env.do(t, "DELETE", "/api/services/8", "")
-	env.do(t, "DELETE", "/api/services/8", "") // 404: must not notify
-	if env.servicesChange != 2 {
-		t.Fatalf("monitor notified %d times, want 2", env.servicesChange)
+	if env.servicesChange != 1 {
+		t.Fatalf("adding a service notified the monitor %d times, want 1", env.servicesChange)
+	}
+	// Deleting must not wake the monitor: an early round would re-probe every other service.
+	if rec := env.do(t, "DELETE", "/api/services/8", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d", rec.Code)
+	}
+	if env.servicesChange != 1 {
+		t.Fatalf("deleting a service notified the monitor (%d notifications)", env.servicesChange)
 	}
 }
 

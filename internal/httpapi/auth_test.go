@@ -1,11 +1,39 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+// A proxy may add its X-Forwarded-For as a separate header line; the client's
+// forged line must not win just because it comes first.
+func TestClientIPReadsLastHeaderLine(t *testing.T) {
+	a := &api{trustProxy: true}
+	r := httptest.NewRequest("POST", "/api/login", nil)
+	r.RemoteAddr = "172.18.0.2:4000"
+	r.Header.Add("X-Forwarded-For", "1.1.1.1")      // sent by the client
+	r.Header.Add("X-Forwarded-For", "198.51.100.9") // appended by the proxy
+	if got := a.clientIP(r); got != "198.51.100.9" {
+		t.Fatalf("clientIP = %q, want the proxy's line", got)
+	}
+}
+
+// If deleting the session row fails, the browser must still lose its cookie.
+func TestLogoutClearsCookieEvenOnStoreError(t *testing.T) {
+	env := newTestEnv(t)
+	env.auth.logoutErr = errors.New("db down")
+	rec := env.do(t, "POST", "/api/logout", "{}")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("logout = %d, want 500", rec.Code)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != sessionCookie || cookies[0].MaxAge >= 0 {
+		t.Fatalf("cookie not cleared on failed logout: %+v", cookies)
+	}
+}
 
 // TestEveryPrivateRouteRequiresSession walks the route table, so a route added
 // without auth fails here instead of shipping open.

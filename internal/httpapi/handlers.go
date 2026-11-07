@@ -236,11 +236,9 @@ func (a *api) deleteService(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "id must be a positive integer")
 		return
 	}
-	err := a.store.DeleteService(r.Context(), id)
-	if err == nil {
-		a.servicesChanged()
-	}
-	a.deleted(w, r, err)
+	// No monitor trigger: the next round simply won't find the service, while
+	// an early round would re-probe every remaining service for nothing.
+	a.deleted(w, r, a.store.DeleteService(r.Context(), id))
 }
 
 func (a *api) servicesChanged() {

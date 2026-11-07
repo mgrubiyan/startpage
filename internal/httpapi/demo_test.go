@@ -71,6 +71,23 @@ func TestMetaReportsMode(t *testing.T) {
 	}
 }
 
+func TestCleanURLChecksEncodedLength(t *testing.T) {
+	// 1000 Cyrillic letters: 2000 bytes raw, so under the limit, but about 6000
+	// characters once percent-encoded, which the database would reject.
+	long := "https://example.com/" + strings.Repeat("я", 1000)
+	if _, err := cleanURL(long); err == nil {
+		t.Fatal("URL over the limit once encoded was accepted")
+	}
+	env := newTestEnv(t)
+	if rec := env.do(t, "POST", "/api/bookmarks", `{"title":"long","url":"`+long+`"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST long bookmark = %d %s, want 400", rec.Code, rec.Body)
+	}
+	// A short non-ASCII URL is still accepted, in encoded form.
+	if got, err := cleanURL("https://example.com/привет"); err != nil || !strings.HasPrefix(got, "https://example.com/%D0%BF") {
+		t.Fatalf("cleanURL = %q, %v", got, err)
+	}
+}
+
 func TestSuggestRateLimited(t *testing.T) {
 	env := newTestEnv(t, func(d *Deps) { d.SuggestLimiter = auth.NewLimiter(2, time.Minute) })
 	for i := range 2 {

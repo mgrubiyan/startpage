@@ -102,7 +102,7 @@ func run() error {
 			logger.Warn("demo mode without STARTPAGE_TRUST_PROXY: behind a reverse proxy all visitors share one suggestions rate limit")
 		}
 	} else {
-		svc, err := auth.New(cfg.Password, db, cfg.SessionTTL)
+		svc, err := auth.New(ctx, cfg.Password, db, cfg.SessionTTL)
 		if err != nil {
 			return err
 		}

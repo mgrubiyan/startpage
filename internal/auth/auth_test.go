@@ -13,6 +13,9 @@ type memSessions struct {
 	mu       sync.Mutex
 	sessions map[string]time.Time
 	pruned   int
+	hash     []byte
+	replaced int
+	hashErr  error
 }
 
 func newMemSessions() *memSessions { return &memSessions{sessions: map[string]time.Time{}} }
@@ -45,10 +48,25 @@ func (m *memSessions) PruneSessions(context.Context, time.Time) (int64, error) {
 	return 0, nil
 }
 
+func (m *memSessions) PasswordHash(context.Context) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.hash, m.hashErr
+}
+
+func (m *memSessions) ReplacePasswordHash(_ context.Context, hash []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hash = hash
+	m.replaced++
+	clear(m.sessions)
+	return nil
+}
+
 func newService(t *testing.T) (*Service, *memSessions, *time.Time) {
 	t.Helper()
 	store := newMemSessions()
-	s, err := New("correct-horse", store, time.Hour)
+	s, err := New(context.Background(), "correct-horse", store, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,5 +139,59 @@ func TestLogout(t *testing.T) {
 	}
 	if err := s.Logout(ctx, "garbage"); err != nil {
 		t.Fatalf("logout with garbage token: %v", err)
+	}
+}
+
+func TestRestartWithSamePasswordKeepsSessions(t *testing.T) {
+	ctx := context.Background()
+	s, store, _ := newService(t)
+	token, _, err := s.Login(ctx, "correct-horse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashBefore := store.hash
+
+	restarted, err := New(ctx, "correct-horse", store, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted.now = s.now // same frozen clock, so the 1h session hasn't expired
+	if ok, _ := restarted.Authenticate(ctx, token); !ok {
+		t.Fatal("a restart with the same password ended the session")
+	}
+	if store.replaced != 1 || !bytes.Equal(store.hash, hashBefore) {
+		t.Fatalf("same password rewrote the stored hash (%d replacements)", store.replaced)
+	}
+}
+
+func TestPasswordChangeEndsSessions(t *testing.T) {
+	ctx := context.Background()
+	s, store, _ := newService(t)
+	token, _, err := s.Login(ctx, "correct-horse")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rotated, err := New(ctx, "new-password-1", store, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated.now = s.now // otherwise the session could fail only for having expired
+	if ok, _ := rotated.Authenticate(ctx, token); ok {
+		t.Fatal("a session from the old password survived the password change")
+	}
+	if _, _, err := rotated.Login(ctx, "correct-horse"); !errors.Is(err, ErrInvalidPassword) {
+		t.Fatalf("old password: err = %v", err)
+	}
+	if _, _, err := rotated.Login(ctx, "new-password-1"); err != nil {
+		t.Fatalf("new password: %v", err)
+	}
+}
+
+func TestNewReportsStoreErrors(t *testing.T) {
+	store := newMemSessions()
+	store.hashErr = errors.New("db down")
+	if _, err := New(context.Background(), "correct-horse", store, time.Hour); err == nil {
+		t.Fatal("New ignored a store error")
 	}
 }
