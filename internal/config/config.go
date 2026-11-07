@@ -19,6 +19,8 @@ type Config struct {
 	SessionTTL      time.Duration
 	MonitorInterval time.Duration
 	LogLevel        slog.Level
+	// Demo runs a public read-only showcase: no login, every write refused.
+	Demo bool
 }
 
 const (
@@ -38,14 +40,19 @@ func Load(getenv func(string) string) (Config, error) {
 	if cfg.DatabaseURL == "" {
 		errs = append(errs, errors.New("DATABASE_URL is required"))
 	}
+	var err error
+	if cfg.Demo, err = parseBool(getenv, "STARTPAGE_DEMO", false); err != nil {
+		errs = append(errs, err)
+	}
 	switch {
+	case cfg.Demo:
+		// No login in demo mode, so no password to check.
 	case len(cfg.Password) < minPasswordLen:
 		errs = append(errs, fmt.Errorf("STARTPAGE_PASSWORD must be at least %d characters", minPasswordLen))
 	case len(cfg.Password) > maxPasswordBytes:
 		errs = append(errs, fmt.Errorf("STARTPAGE_PASSWORD must be at most %d bytes (bcrypt limit)", maxPasswordBytes))
 	}
 
-	var err error
 	if cfg.SecureCookie, err = parseBool(getenv, "STARTPAGE_SECURE_COOKIE", false); err != nil {
 		errs = append(errs, err)
 	}

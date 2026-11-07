@@ -99,7 +99,7 @@ func (a *api) cookie(value string, maxAge int) *http.Cookie {
 	}
 }
 
-// clientIP returns the address used for login rate limiting.
+// clientIP returns the address used for per-client rate limiting.
 //
 // X-Forwarded-For is client-controlled unless a trusted proxy overwrites it, so it is
 // only honoured with TrustProxy, and then only its last entry: the one appended by

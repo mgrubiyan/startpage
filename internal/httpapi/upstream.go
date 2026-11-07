@@ -104,6 +104,11 @@ func (a *api) getRates(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) getSuggestions(w http.ResponseWriter, r *http.Request) {
+	if a.suggestLimiter != nil && !a.suggestLimiter.Allow(a.clientIP(r)) {
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusTooManyRequests, "too many requests, try again later")
+		return
+	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
 		writeJSON(w, http.StatusOK, suggestDTO{Query: "", Suggestions: []string{}})

@@ -68,6 +68,7 @@ func TestLoadErrors(t *testing.T) {
 		{"short password", "STARTPAGE_PASSWORD", "short", "at least 8 characters"},
 		{"password over bcrypt limit", "STARTPAGE_PASSWORD", strings.Repeat("п", 37), "at most 72 bytes"}, // 74 bytes
 		{"bad bool", "STARTPAGE_SECURE_COOKIE", "yes please", "STARTPAGE_SECURE_COOKIE"},
+		{"bad demo flag", "STARTPAGE_DEMO", "maybe", "STARTPAGE_DEMO"},
 		{"bad duration", "STARTPAGE_SESSION_TTL", "forever", "STARTPAGE_SESSION_TTL"},
 		{"interval too small", "STARTPAGE_MONITOR_INTERVAL", "1s", "at least 5s"},
 		{"bad log level", "LOG_LEVEL", "loud", "LOG_LEVEL"},
@@ -84,5 +85,24 @@ func TestLoadErrors(t *testing.T) {
 				t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestDemoNeedsNoPassword(t *testing.T) {
+	cfg, err := Load(env(map[string]string{
+		"DATABASE_URL":   "postgres://db/startpage",
+		"STARTPAGE_DEMO": "true",
+	}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Demo {
+		t.Fatal("Demo = false, want true")
+	}
+
+	// Without the flag the same environment must still fail on the password.
+	if _, err := Load(env(map[string]string{"DATABASE_URL": "postgres://db/startpage"})); err == nil ||
+		!strings.Contains(err.Error(), "STARTPAGE_PASSWORD") {
+		t.Fatalf("non-demo without password: err = %v", err)
 	}
 }

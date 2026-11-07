@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -31,6 +32,12 @@ type Deps struct {
 	Now func() time.Time
 	// OnServicesChanged is called after a service is added or removed; may be nil.
 	OnServicesChanged func()
+	// Demo serves a public read-only showcase: reads need no session, writes
+	// (including login) get 403. Auth may be nil in this mode.
+	Demo bool
+	// SuggestLimiter, when set, throttles GET /api/suggest per client IP. A
+	// public demo needs it so it can't be used as a free suggestions proxy.
+	SuggestLimiter RateLimiter
 }
 
 type route struct {
@@ -45,6 +52,7 @@ func (a *api) routes() []route {
 	return []route{
 		{"POST /api/login", a.login, true},
 		{"POST /api/logout", a.logout, true},
+		{"GET /api/meta", a.getMeta, true},
 
 		{"GET /api/settings", a.getSettings, false},
 		{"PUT /api/settings", a.putSettings, false},
@@ -77,17 +85,15 @@ func New(d Deps) http.Handler {
 		logger:            d.Logger,
 		now:               d.Now,
 		onServicesChanged: d.OnServicesChanged,
+		demo:              d.Demo,
+		suggestLimiter:    d.SuggestLimiter,
 	}
 
 	apiMux := http.NewServeMux()
 	for _, rt := range a.routes() {
-		h := rt.handler
-		if !rt.public {
-			h = a.requireAuth(h)
-		}
 		// Per route rather than around the mux, so an unknown path is a 404,
 		// not a 415 for the wrong content type.
-		apiMux.Handle(rt.pattern, requireJSON(h))
+		apiMux.Handle(rt.pattern, requireJSON(a.guard(rt)))
 	}
 
 	mux := http.NewServeMux()
@@ -103,6 +109,34 @@ func New(d Deps) http.Handler {
 		recoverPanics(d.Logger),
 		securityHeaders,
 	)
+}
+
+// guard applies the access policy to a route. Normally every non-public route
+// needs a session. In demo mode reads are open to everyone and every write is
+// refused, so visitors can't change the data or add their own probe targets.
+func (a *api) guard(rt route) http.HandlerFunc {
+	method, _, _ := strings.Cut(rt.pattern, " ")
+	switch {
+	case a.demo && method != http.MethodGet:
+		return demoReadOnly
+	case a.demo, rt.public:
+		return rt.handler
+	default:
+		return a.requireAuth(rt.handler)
+	}
+}
+
+func demoReadOnly(w http.ResponseWriter, _ *http.Request) {
+	writeError(w, http.StatusForbidden, "demo mode is read-only")
+}
+
+type metaDTO struct {
+	Demo bool `json:"demo"`
+}
+
+// getMeta tells the frontend how the server runs, e.g. to hide edit controls in demo mode.
+func (a *api) getMeta(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, metaDTO{Demo: a.demo})
 }
 
 func healthz(ping func(context.Context) error) http.HandlerFunc {

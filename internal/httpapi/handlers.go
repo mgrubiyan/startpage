@@ -80,6 +80,9 @@ type api struct {
 	now          func() time.Time
 	// onServicesChanged lets the monitor check a new service right away instead of waiting a tick.
 	onServicesChanged func()
+
+	demo           bool
+	suggestLimiter RateLimiter // nil means unlimited
 }
 
 func (a *api) internalError(w http.ResponseWriter, r *http.Request, err error) {

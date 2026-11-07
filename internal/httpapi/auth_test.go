@@ -34,7 +34,7 @@ func TestEveryPrivateRouteRequiresSession(t *testing.T) {
 			}
 		})
 	}
-	if private < 10 || public != 2 {
+	if private < 10 || public != 3 {
 		t.Fatalf("route table changed shape: %d private, %d public", private, public)
 	}
 	if n := len(env.store.bookmarks); n != 1 {

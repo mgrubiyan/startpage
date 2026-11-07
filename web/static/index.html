@@ -20,6 +20,10 @@
   </section>
 
   <main id="app" class="wrap" hidden>
+    <p id="demo-banner" class="demo-banner" hidden>
+      Демо: только просмотр, изменения отключены.
+      <a href="https://github.com/mgrubiyan/startpage">Исходники на GitHub</a>
+    </p>
     <header class="top">
       <div class="clock">
         <div id="time" class="time">--:--</div>
@@ -48,9 +52,9 @@
     <section class="section-head">
       <h2>Закладки</h2>
       <div class="actions">
-        <button type="button" id="edit-toggle" class="ghost">Изменить</button>
-        <button type="button" id="settings-toggle" class="ghost">Настройки</button>
-        <button type="button" id="logout" class="ghost">Выйти</button>
+        <button type="button" id="edit-toggle" class="ghost edit-only">Изменить</button>
+        <button type="button" id="settings-toggle" class="ghost edit-only">Настройки</button>
+        <button type="button" id="logout" class="ghost edit-only">Выйти</button>
       </div>
     </section>
 
@@ -77,7 +81,7 @@
     <section class="section-head services-head">
       <h2>Сервисы</h2>
       <div class="actions">
-        <button type="button" id="services-edit" class="ghost">Изменить</button>
+        <button type="button" id="services-edit" class="ghost edit-only">Изменить</button>
       </div>
     </section>
     <ul id="services" class="services"></ul>

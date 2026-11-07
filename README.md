@@ -11,6 +11,8 @@ the Go JSON API; the browser doesn't call third-party APIs. The one exception is
 bookmark icons, which load from Google's favicon service, so bookmark hostnames
 are visible to Google.
 
+![startpage in demo mode: clock, weather, CBR rates, search, bookmarks and the service monitor](docs/screenshot.png)
+
 ## Features
 
 - **Search**: default engine plus prefixes (`g`, `y`, `d`, `gh`, `yt`, `w`), address detection,
@@ -19,6 +21,7 @@ are visible to Google.
 - **Bookmarks and settings**: stored in Postgres.
 - **Service monitor**: background prober with latency, last error and 24h uptime per service.
 - **Single-user login**: password, server-side sessions, rate-limited.
+- **Demo mode**: a public read-only instance with no login, for showing the project.
 - **Chrome extension**: makes every new tab open the start page.
 
 ## Architecture
@@ -110,14 +113,31 @@ own bots on `localhost` or a LAN is the whole point. This is acceptable because:
 If you expose startpage to other users, add an address allow-list in `internal/monitor`
 before doing so.
 
+### Demo mode
+
+`STARTPAGE_DEMO=true` turns an instance into a public showcase:
+
+- No login and no password. Every `GET` route is open, and every write, login included,
+  answers `403`. The policy lives in one place (`guard` in `internal/httpapi/server.go`), and a
+  test walks the route table to prove that no write gets through.
+- Because nobody can add services, the SSRF concern above doesn't apply. On an empty database
+  the demo seeds its own monitor targets (`internal/demo`), including one that is always down.
+- Search suggestions are limited to 60 requests per minute per IP, so the demo can't be used as
+  a free suggestions proxy.
+- The frontend reads `GET /api/meta`, shows a banner and hides the edit controls.
+
+Run the demo as a separate instance with its own database, never against your real data.
+
 ## API
 
-All endpoints except login and logout require the session cookie. JSON in, JSON out.
+All endpoints except login, logout and meta require the session cookie (in demo mode, reads
+are open and writes are refused). JSON in, JSON out.
 
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/login` | `{"password": "..."}` → sets the session cookie (204) |
 | `POST` | `/api/logout` | deletes the session |
+| `GET` | `/api/meta` | `{"demo": false}`: how the server runs (public) |
 | `GET` / `PUT` | `/api/settings` | `{"searchEngine": "g", "city": "Санкт-Петербург"}` |
 | `GET` / `POST` | `/api/bookmarks` | list / add `{"title", "url"}` |
 | `DELETE` | `/api/bookmarks/{id}` | |
@@ -146,6 +166,7 @@ The app is published on `127.0.0.1` only. To watch a service running on the Dock
 ```sh
 make test-db    # throwaway Postgres 17 in Docker on 127.0.0.1:55432
 make run        # password: correct-horse (override with STARTPAGE_PASSWORD)
+make run-demo   # the same, in read-only demo mode
 ```
 
 ### Configuration
@@ -153,7 +174,8 @@ make run        # password: correct-horse (override with STARTPAGE_PASSWORD)
 | Variable | Default | |
 |---|---|---|
 | `DATABASE_URL` | (required) | Postgres connection string |
-| `STARTPAGE_PASSWORD` | (required) | login password, 8 to 72 bytes |
+| `STARTPAGE_PASSWORD` | (required) | login password, 8 to 72 bytes; not used in demo mode |
+| `STARTPAGE_DEMO` | `false` | public read-only demo, see [Demo mode](#demo-mode) |
 | `STARTPAGE_ADDR` | `:8080` | listen address |
 | `STARTPAGE_SECURE_COOKIE` | `false` | set `true` behind HTTPS |
 | `STARTPAGE_TRUST_PROXY` | `false` | use the last `X-Forwarded-For` entry as client IP |

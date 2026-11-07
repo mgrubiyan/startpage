@@ -16,6 +16,7 @@ import (
 	"github.com/mgrubiyan/startpage/internal/auth"
 	"github.com/mgrubiyan/startpage/internal/cache"
 	"github.com/mgrubiyan/startpage/internal/config"
+	"github.com/mgrubiyan/startpage/internal/demo"
 	"github.com/mgrubiyan/startpage/internal/fetch"
 	"github.com/mgrubiyan/startpage/internal/httpapi"
 	"github.com/mgrubiyan/startpage/internal/monitor"
@@ -79,9 +80,26 @@ func run() error {
 		<-monitorDone
 	}()
 
-	authService, err := auth.New(cfg.Password, db, cfg.SessionTTL)
-	if err != nil {
-		return err
+	// Demo mode has no login: leave Auth nil (the API never calls it then), seed
+	// monitor targets on an empty database and throttle the public suggestions proxy.
+	var authService httpapi.Authenticator
+	var suggestLimiter httpapi.RateLimiter
+	if cfg.Demo {
+		selfURL, err := localURL(cfg.Addr)
+		if err != nil {
+			return err
+		}
+		if err := demo.Seed(ctx, db, selfURL); err != nil {
+			return err
+		}
+		suggestLimiter = auth.NewLimiter(60, time.Minute)
+		logger.Info("demo mode: read-only, no login")
+	} else {
+		svc, err := auth.New(cfg.Password, db, cfg.SessionTTL)
+		if err != nil {
+			return err
+		}
+		authService = svc
 	}
 
 	upstream := fetch.NewClient()
@@ -104,6 +122,8 @@ func run() error {
 		SecureCookie:      cfg.SecureCookie,
 		TrustProxy:        cfg.TrustProxy,
 		OnServicesChanged: mon.Trigger,
+		Demo:              cfg.Demo,
+		SuggestLimiter:    suggestLimiter,
 	})
 
 	srv := &http.Server{
@@ -140,21 +160,30 @@ func run() error {
 	return nil
 }
 
-// healthcheck GETs /healthz on the local listener described by addr (STARTPAGE_ADDR).
-func healthcheck(addr string) error {
+// localURL is the base URL of the local listener described by addr (STARTPAGE_ADDR).
+func localURL(addr string) (string, error) {
 	if addr == "" {
 		addr = ":8080"
 	}
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
-		return fmt.Errorf("bad STARTPAGE_ADDR %q: %w", addr, err)
+		return "", fmt.Errorf("bad STARTPAGE_ADDR %q: %w", addr, err)
 	}
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
 	}
+	return "http://" + net.JoinHostPort(host, port), nil
+}
+
+// healthcheck GETs /healthz on the local listener described by addr (STARTPAGE_ADDR).
+func healthcheck(addr string) error {
+	base, err := localURL(addr)
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+net.JoinHostPort(host, port)+"/healthz", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/healthz", nil)
 	if err != nil {
 		return err
 	}

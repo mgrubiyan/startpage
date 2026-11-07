@@ -446,7 +446,17 @@ $('search').addEventListener('submit', (e) => {
 });
 
 // ---------- boot ----------
+// Demo mode hides edit controls; the server refuses writes either way.
+async function loadMeta() {
+  try {
+    const meta = await api('/api/meta');
+    document.body.classList.toggle('demo', meta.demo);
+    $('demo-banner').hidden = !meta.demo;
+  } catch { /* old server or network error: behave as a normal instance */ }
+}
+
 async function boot() {
+  await loadMeta();
   try {
     state.settings = await api('/api/settings');
   } catch (e) {

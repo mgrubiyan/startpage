@@ -272,3 +272,16 @@ button, input, select { font: inherit; color: inherit; }
   .time { font-size: 48px; }
   .wrap { padding-top: 6vh; }
 }
+
+/* ---------- demo mode ---------- */
+.demo .edit-only { display: none; }
+.demo-banner {
+  margin: 0 0 20px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+.demo-banner a { color: var(--text); }

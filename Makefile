@@ -1,8 +1,9 @@
 TEST_DB_CONTAINER ?= startpage-testdb
 TEST_DB_PORT      ?= 55432
 TEST_DATABASE_URL ?= postgres://postgres:test@127.0.0.1:$(TEST_DB_PORT)/postgres?sslmode=disable
+DEMO_DATABASE_URL ?= postgres://postgres:test@127.0.0.1:$(TEST_DB_PORT)/startpage_demo?sslmode=disable
 
-.PHONY: build run test test-db test-integration lint up down
+.PHONY: build run run-demo test test-db test-integration lint up down
 
 build:
 	CGO_ENABLED=0 go build -trimpath -o bin/startpage ./cmd/startpage
@@ -10,6 +11,12 @@ build:
 ## run: start locally against the test database (make test-db first)
 run:
 	DATABASE_URL='$(TEST_DATABASE_URL)' STARTPAGE_PASSWORD=$${STARTPAGE_PASSWORD:-correct-horse} go run ./cmd/startpage
+
+## run-demo: read-only demo mode, in its own database so the seed stays out of `make run` data
+run-demo:
+	docker exec $(TEST_DB_CONTAINER) psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'startpage_demo'" | grep -q 1 \
+		|| docker exec $(TEST_DB_CONTAINER) createdb -U postgres startpage_demo
+	DATABASE_URL='$(DEMO_DATABASE_URL)' STARTPAGE_DEMO=true go run ./cmd/startpage
 
 ## test: unit tests only (Postgres tests skip without TEST_DATABASE_URL)
 test:
