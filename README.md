@@ -184,3 +184,7 @@ make lint               # go vet + golangci-lint
   parallel.
 
 CI runs vet, the full suite with a Postgres service container, golangci-lint, and a Docker build.
+
+## License
+
+[MIT](LICENSE)
