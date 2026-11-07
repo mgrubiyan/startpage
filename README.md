@@ -37,10 +37,12 @@ internal/weather         Open-Meteo geocoding + forecast client
 internal/rates           CBR daily rates client
 internal/suggest         search suggestions client (Google → DuckDuckGo fallback)
 internal/monitor         ticker-driven prober with a bounded worker pool
+internal/demo            monitor targets seeded into an empty demo database
 internal/store           domain types
 internal/store/postgres  pgx/v5 store, embedded SQL migrations
 web/static               frontend, embedded with go:embed
 extension                MV3 new-tab extension that redirects to the server
+deploy                   VPS setup: Caddy + shared Postgres, app compose, backups
 ```
 
 Only the standard library is used for HTTP and logging (`net/http` 1.22+ method
@@ -186,6 +188,15 @@ make run-demo   # the same, in read-only demo mode
 | `STARTPAGE_MONITOR_INTERVAL` | `1m` | probe interval (min `5s`) |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
+### On a server
+
+[deploy/README.md](deploy/README.md) covers a VPS:
+- Caddy with automatic TLS;
+- one shared Postgres with a role and database per app;
+- the personal instance next to the public demo;
+- daily backups;
+- optional deploys from CI. Images are published to GHCR on every push to `main`.
+
 ### New-tab extension
 
 1. Open `chrome://extensions` and enable **Developer mode**.
@@ -209,6 +220,7 @@ make lint               # go vet + golangci-lint
   parallel.
 
 CI runs vet, the full suite with a Postgres service container, golangci-lint, and a Docker build.
+On `main` it also publishes the image to GHCR, and deploys it when a server is configured.
 
 ## License
 

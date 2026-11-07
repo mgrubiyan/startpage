@@ -1,0 +1,37 @@
+# startpage on the VPS: the personal instance and the public read-only demo.
+# Both use the image CI publishes and join the "web" network from deploy/infra,
+# where Caddy and Postgres live. No ports are published: only Caddy is public,
+# which is what makes STARTPAGE_TRUST_PROXY=true safe here.
+#
+# Lives in /opt/startpage on the server. See deploy/README.md.
+name: startpage
+
+x-app: &app
+  image: ghcr.io/mgrubiyan/startpage:${STARTPAGE_TAG:-latest}
+  networks: [web]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  startpage:
+    <<: *app
+    environment:
+      DATABASE_URL: postgres://startpage:${STARTPAGE_DB_PASSWORD:?set STARTPAGE_DB_PASSWORD in .env}@postgres:5432/startpage?sslmode=disable
+      STARTPAGE_PASSWORD: ${STARTPAGE_PASSWORD:?set STARTPAGE_PASSWORD in .env}
+      STARTPAGE_SECURE_COOKIE: "true"
+      STARTPAGE_TRUST_PROXY: "true"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+  startpage-demo:
+    <<: *app
+    environment:
+      DATABASE_URL: postgres://startpage_demo:${STARTPAGE_DEMO_DB_PASSWORD:?set STARTPAGE_DEMO_DB_PASSWORD in .env}@postgres:5432/startpage_demo?sslmode=disable
+      STARTPAGE_DEMO: "true"
+      STARTPAGE_TRUST_PROXY: "true"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+networks:
+  web:
+    external: true

@@ -8,3 +8,5 @@ extension
 *.test
 *.out
 coverage.*
+docs
+deploy
