@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: startpage
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: startpage
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U startpage -d startpage"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://startpage:${POSTGRES_PASSWORD}@db:5432/startpage?sslmode=disable
+      STARTPAGE_PASSWORD: ${STARTPAGE_PASSWORD:?set STARTPAGE_PASSWORD in .env}
+      STARTPAGE_SECURE_COOKIE: ${STARTPAGE_SECURE_COOKIE:-false}
+      STARTPAGE_TRUST_PROXY: ${STARTPAGE_TRUST_PROXY:-false}
+      STARTPAGE_MONITOR_INTERVAL: ${STARTPAGE_MONITOR_INTERVAL:-1m}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    # Lets the monitor reach services on the Docker host as http://host.docker.internal:PORT
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${STARTPAGE_PORT:-8080}:8080"
+    restart: unless-stopped
+
+volumes:
+  pgdata:

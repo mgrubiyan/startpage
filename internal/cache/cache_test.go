@@ -1,0 +1,227 @@
+package cache
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
+func newClock() *fakeClock { return &fakeClock{now: time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)} }
+
+func TestFreshHitDoesNotReload(t *testing.T) {
+	clock := newClock()
+	var calls atomic.Int32
+	c := New(time.Minute, func(_ context.Context, key string) (string, error) {
+		calls.Add(1)
+		return "v:" + key, nil
+	}, WithClock(clock.Now))
+
+	for range 3 {
+		r, err := c.Get(context.Background(), "spb")
+		if err != nil || r.Value != "v:spb" || r.Stale {
+			t.Fatalf("Get = %+v, %v", r, err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("loader called %d times, want 1", calls.Load())
+	}
+
+	clock.Advance(time.Minute)
+	if _, err := c.Get(context.Background(), "spb"); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("expired entry not reloaded: %d calls", calls.Load())
+	}
+}
+
+func TestFailureServesStaleAndIsNotCached(t *testing.T) {
+	clock := newClock()
+	var fail atomic.Bool
+	var calls atomic.Int32
+	c := New(time.Minute, func(context.Context, string) (int, error) {
+		calls.Add(1)
+		if fail.Load() {
+			return 0, errors.New("upstream down")
+		}
+		return 42, nil
+	}, WithClock(clock.Now))
+
+	first, err := c.Get(context.Background(), "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fail.Store(true)
+	clock.Advance(2 * time.Minute)
+	r, err := c.Get(context.Background(), "k")
+	if err != nil || !r.Stale || r.Value != 42 || !r.FetchedAt.Equal(first.FetchedAt) {
+		t.Fatalf("stale fallback = %+v, %v", r, err)
+	}
+
+	// Within the error backoff the stale value is served without touching upstream.
+	clock.Advance(10 * time.Second)
+	r, err = c.Get(context.Background(), "k")
+	if err != nil || !r.Stale || r.Value != 42 || calls.Load() != 2 {
+		t.Fatalf("inside backoff = %+v, %v, calls=%d; want stale with no new load", r, err, calls.Load())
+	}
+
+	// The failure must not have refreshed the entry: after the backoff the next call retries.
+	fail.Store(false)
+	clock.Advance(30 * time.Second)
+	r, err = c.Get(context.Background(), "k")
+	if err != nil || r.Stale || calls.Load() != 3 {
+		t.Fatalf("after recovery = %+v, %v, calls=%d", r, err, calls.Load())
+	}
+
+	// A successful refresh clears the backoff: once expired again, it reloads at once.
+	clock.Advance(2 * time.Minute)
+	if _, err := c.Get(context.Background(), "k"); err != nil || calls.Load() != 4 {
+		t.Fatalf("backoff not cleared by success: calls=%d, %v", calls.Load(), err)
+	}
+
+	fail.Store(true)
+	if _, err := c.Get(context.Background(), "never-loaded"); err == nil {
+		t.Fatal("failure without a cached value must return the error")
+	}
+}
+
+func TestConcurrentMissesShareOneLoad(t *testing.T) {
+	release := make(chan struct{})
+	entered := make(chan struct{}, 64) // room for extra calls, so a regression fails instead of hanging
+	var calls atomic.Int32
+	c := New(time.Minute, func(context.Context, string) (int, error) {
+		calls.Add(1)
+		entered <- struct{}{}
+		<-release
+		return 7, nil
+	})
+
+	const n = 50
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r, err := c.Get(context.Background(), "same")
+			if err == nil && r.Value != 7 {
+				err = fmt.Errorf("value %d", r.Value)
+			}
+			errs <- err
+		}()
+	}
+	// Release once the load is in flight. Callers that arrive later either join
+	// it or, if it already finished, hit the fresh entry (re-checked inside the
+	// singleflight call), so exactly one load is guaranteed either way.
+	<-entered
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("loader called %d times for %d concurrent misses, want 1", calls.Load(), n)
+	}
+}
+
+func TestCallerCancelDoesNotAbortSharedLoad(t *testing.T) {
+	release := make(chan struct{})
+	entered := make(chan struct{}, 2)
+	var calls atomic.Int32
+	c := New(time.Minute, func(ctx context.Context, _ string) (string, error) {
+		calls.Add(1)
+		entered <- struct{}{}
+		select {
+		case <-release:
+			return "done", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := c.Get(ctx, "k")
+		firstDone <- err
+	}()
+	<-entered // the load is in flight
+	cancel()
+	if err := <-firstDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled caller got %v", err)
+	}
+
+	// Whether the second caller joins the in-flight load or arrives after it
+	// stored its value, a load that survived the cancel means exactly one call.
+	// Had it died with the first caller, a second load would be needed.
+	secondDone := make(chan string, 1)
+	go func() {
+		r, _ := c.Get(context.Background(), "k")
+		secondDone <- r.Value
+	}()
+	close(release)
+	if v := <-secondDone; v != "done" {
+		t.Fatalf("second caller got %q", v)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("loader called %d times: the shared load died with the cancelled caller", n)
+	}
+}
+
+func TestLoadTimeout(t *testing.T) {
+	c := New(time.Minute, func(ctx context.Context, _ string) (int, error) {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}, WithLoadTimeout(20*time.Millisecond))
+	_, err := c.Get(context.Background(), "k")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want deadline exceeded", err)
+	}
+}
+
+func TestEvictionBoundsSize(t *testing.T) {
+	clock := newClock()
+	c := New(time.Hour, func(_ context.Context, key string) (string, error) { return key, nil },
+		WithClock(clock.Now), WithMaxEntries(3))
+	for i := range 10 {
+		clock.Advance(time.Second)
+		if _, err := c.Get(context.Background(), fmt.Sprint(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c.Len() != 3 {
+		t.Fatalf("Len = %d, want 3", c.Len())
+	}
+	c.mu.Lock()
+	_, newest := c.items["9"]
+	_, oldest := c.items["0"]
+	c.mu.Unlock()
+	if !newest || oldest {
+		t.Fatalf("eviction kept wrong keys: newest=%v oldest=%v", newest, oldest)
+	}
+}

@@ -1,0 +1,25 @@
+# Caddy obtains and renews the TLS certificates itself.
+#
+# X-Forwarded-For: requests reach Caddy straight from clients, and no
+# trusted_proxies are configured, so Caddy replaces any incoming value with the
+# real client IP. That is the entry the app reads with STARTPAGE_TRUST_PROXY=true.
+{
+	email {$ACME_EMAIL}
+}
+
+(common) {
+	encode zstd gzip
+	header -Server
+}
+
+# Personal instance: password login.
+{$HOME_DOMAIN} {
+	import common
+	reverse_proxy startpage:8080
+}
+
+# Public read-only demo.
+{$DEMO_DOMAIN} {
+	import common
+	reverse_proxy startpage-demo:8080
+}

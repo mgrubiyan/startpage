@@ -1,0 +1,12 @@
+.git
+.github
+.claude
+.env
+bin
+extension
+*.md
+*.test
+*.out
+coverage.*
+docs
+deploy

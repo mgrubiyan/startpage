@@ -1,0 +1,54 @@
+# Shared infrastructure for everything on the VPS: the TLS reverse proxy and one
+# Postgres server. It is its own compose project, so `docker compose down` in an
+# app project never takes the database away from the other apps.
+#
+# Lives in /opt/infra on the server. See deploy/README.md.
+name: infra
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: caddy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+      HOME_DOMAIN: ${HOME_DOMAIN:?set HOME_DOMAIN in .env}
+      DEMO_DOMAIN: ${DEMO_DOMAIN:?set DEMO_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [web]
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: postgres
+    # No ports: only containers on the "web" network can reach it.
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Read by initdb/01-startpage.sh on the first start only.
+      STARTPAGE_DB_PASSWORD: ${STARTPAGE_DB_PASSWORD:?set STARTPAGE_DB_PASSWORD in .env}
+      STARTPAGE_DEMO_DB_PASSWORD: ${STARTPAGE_DEMO_DB_PASSWORD:?set STARTPAGE_DEMO_DB_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [web]
+    restart: unless-stopped
+
+networks:
+  web:
+    name: web # fixed name, so app projects can join it as an external network
+
+volumes:
+  caddy_data:
+  caddy_config:
+  pgdata:

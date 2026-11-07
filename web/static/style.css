@@ -92,13 +92,37 @@ button, input, select { font: inherit; color: inherit; }
   pointer-events: none;
 }
 
-.bookmarks-head {
+.suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 10;
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+.suggestions li {
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.suggestions li:hover, .suggestions li[aria-selected="true"] { background: var(--bg); }
+
+.section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
 }
-.bookmarks-head h2 { font-size: 13px; font-weight: 500; color: var(--muted); margin: 0; text-transform: uppercase; letter-spacing: .06em; }
+.section-head h2 { font-size: 13px; font-weight: 500; color: var(--muted); margin: 0; text-transform: uppercase; letter-spacing: .06em; }
 .actions { display: flex; gap: 4px; }
 .ghost {
   background: none;
@@ -164,24 +188,24 @@ button, input, select { font: inherit; color: inherit; }
 }
 .editing .remove { display: block; }
 
-.add-bookmark, .settings {
+.inline-form, .settings {
   margin-top: 16px;
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   align-items: flex-end;
 }
-.add-bookmark input, .settings input, .settings select {
+.inline-form input, .settings input, .settings select, .login-card input {
   padding: 8px 10px;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--surface);
   min-width: 0;
 }
-.add-bookmark input { flex: 1 1 160px; }
+.inline-form input { flex: 1 1 160px; }
 .settings label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); flex: 1 1 200px; }
 .settings label > * { font-size: 15px; color: var(--text); }
-.add-bookmark button, .settings button {
+.inline-form button, .settings button, .login-card button {
   padding: 8px 14px;
   border-radius: 10px;
   border: 0;
@@ -189,16 +213,27 @@ button, input, select { font: inherit; color: inherit; }
   color: #fff;
   cursor: pointer;
 }
-.settings label.wide { flex-basis: 100%; }
-.settings textarea {
-  padding: 8px 10px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-  resize: vertical;
+
+.login {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
 }
-.settings code { font-size: 12px; }
+.login-card {
+  width: min(320px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 28px 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+.login-card h1 { margin: 0 0 6px; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.login-card input { padding: 10px 12px; }
+.login-card button { padding: 10px 14px; }
 
 .services-head { margin-top: 28px; }
 .services { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -217,6 +252,17 @@ button, input, select { font: inherit; color: inherit; }
 .dot.ok { background: #2e9d57; }
 .dot.fail { background: var(--danger); }
 .services li.empty { color: var(--muted); font-size: 13px; }
+.remove-inline {
+  display: none;
+  border: 0;
+  background: none;
+  color: var(--danger);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+.services.editing .remove-inline { display: block; }
 
 .error { color: var(--danger); font-size: 13px; flex-basis: 100%; }
 .muted { color: var(--muted); font-size: 13px; }
@@ -226,3 +272,16 @@ button, input, select { font: inherit; color: inherit; }
   .time { font-size: 48px; }
   .wrap { padding-top: 6vh; }
 }
+
+/* ---------- demo mode ---------- */
+.demo .edit-only { display: none; }
+.demo-banner {
+  margin: 0 0 20px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+.demo-banner a { color: var(--text); }
