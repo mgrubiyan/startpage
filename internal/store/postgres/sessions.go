@@ -2,8 +2,11 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // CreateSession stores a session token hash.
@@ -42,4 +45,39 @@ func (s *Store) PruneSessions(ctx context.Context, now time.Time) (int64, error)
 		return 0, fmt.Errorf("prune sessions: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// PasswordHash returns the stored bcrypt hash of the login password, or nil if
+// none has been stored yet.
+func (s *Store) PasswordHash(ctx context.Context) ([]byte, error) {
+	var hash []byte
+	err := s.pool.QueryRow(ctx, "SELECT password_hash FROM auth WHERE id = 1").Scan(&hash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read password hash: %w", err)
+	}
+	return hash, nil
+}
+
+// ReplacePasswordHash stores a new password hash and deletes every session in one
+// transaction, so no session outlives the password it was issued under.
+func (s *Store) ReplacePasswordHash(ctx context.Context, hash []byte) error {
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "DELETE FROM sessions"); err != nil {
+			return fmt.Errorf("delete sessions: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO auth (id, password_hash) VALUES (1, $1)
+			ON CONFLICT (id) DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = now()`,
+			hash); err != nil {
+			return fmt.Errorf("store password hash: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("replace password hash: %w", err)
+	}
+	return nil
 }

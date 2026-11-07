@@ -75,13 +75,15 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) logout(w http.ResponseWriter, r *http.Request) {
+	// Clear the cookie first: even if deleting the session row fails below, the
+	// browser must not stay logged in while the UI shows the login screen.
+	http.SetCookie(w, a.cookie("", -1))
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		if err := a.auth.Logout(r.Context(), c.Value); err != nil {
 			a.internalError(w, r, err)
 			return
 		}
 	}
-	http.SetCookie(w, a.cookie("", -1))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -103,11 +105,12 @@ func (a *api) cookie(value string, maxAge int) *http.Cookie {
 //
 // X-Forwarded-For is client-controlled unless a trusted proxy overwrites it, so it is
 // only honoured with TrustProxy, and then only its last entry: the one appended by
-// our own reverse proxy. Earlier entries could be forged to dodge the limit.
+// our own reverse proxy. Earlier entries could be forged to dodge the limit. A proxy
+// may append its value as a separate header line, so the last line is the one read.
 func (a *api) clientIP(r *http.Request) string {
 	if a.trustProxy {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			parts := strings.Split(xff, ",")
+		if lines := r.Header.Values("X-Forwarded-For"); len(lines) > 0 {
+			parts := strings.Split(lines[len(lines)-1], ",")
 			if last := strings.TrimSpace(parts[len(parts)-1]); last != "" {
 				return last
 			}

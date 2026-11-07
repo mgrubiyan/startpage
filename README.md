@@ -64,7 +64,9 @@ patterns, `log/slog`). Third-party dependencies are `pgx/v5`,
 - Entry count is bounded; weather is keyed by city, suggestions by query.
 
 **Auth.**
-- The password from `STARTPAGE_PASSWORD` is bcrypt-hashed at startup.
+- The password from `STARTPAGE_PASSWORD` is stored only as a bcrypt hash. At startup the app
+  compares it with the stored hash. If the password was changed, every session is deleted, so a
+  leaked password stops working for anyone already logged in once it is rotated.
 - A session is 32 random bytes sent as an `HttpOnly`, `SameSite=Lax` cookie (`Secure` is configurable).
   Only its SHA-256 is stored, so a database leak doesn't hand out live sessions.
   Expired sessions are pruned on login.

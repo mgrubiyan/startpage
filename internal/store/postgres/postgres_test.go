@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -202,6 +203,31 @@ func TestSessions(t *testing.T) {
 	}
 	if err := s.CreateSession(ctx, []byte("short"), now.Add(time.Hour)); err == nil {
 		t.Fatal("non-SHA-256 token hash must violate CHECK constraint")
+	}
+}
+
+func TestPasswordHashReplacementEndsSessions(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if h, err := s.PasswordHash(ctx); err != nil || h != nil {
+		t.Fatalf("fresh database: hash %q, err %v; want nil, nil", h, err)
+	}
+	if err := s.CreateSession(ctx, bytes32(1), now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	for _, hash := range [][]byte{[]byte("first-hash"), []byte("second-hash")} { // insert, then upsert
+		if err := s.ReplacePasswordHash(ctx, hash); err != nil {
+			t.Fatalf("ReplacePasswordHash(%q): %v", hash, err)
+		}
+		if got, err := s.PasswordHash(ctx); err != nil || !bytes.Equal(got, hash) {
+			t.Fatalf("PasswordHash = %q, %v; want %q", got, err, hash)
+		}
+	}
+	if ok, _ := s.SessionValid(ctx, bytes32(1), now); ok {
+		t.Fatal("session survived a password hash replacement")
 	}
 }
 

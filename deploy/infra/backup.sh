@@ -20,7 +20,9 @@ umask 077 # dumps hold session hashes: owner-only
 mkdir -p "$dir"
 file="$dir/$db-$(date -u +%Y%m%dT%H%M%SZ).dump"
 
-# Write to a temp name first, so a failed dump never looks like a good one.
+# Write to a temp name first, so a failed dump never looks like a good one, and
+# remove it if the dump fails (retention only prunes *.dump files).
+trap 'rm -f "$file.tmp"' EXIT
 docker exec "$container" pg_dump -U postgres --format=custom "$db" > "$file.tmp"
 mv "$file.tmp" "$file"
 find "$dir" -name "$db-*.dump" -mtime +"$keep_days" -delete

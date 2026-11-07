@@ -61,9 +61,9 @@ cp .env.example .env && chmod 600 .env   # same DB passwords as /opt/infra/.env
 docker compose pull && docker compose up -d
 ```
 
-The image `ghcr.io/mgrubiyan/startpage` is published by CI on every push to `main`. A new
-GHCR package is private, so either make it public once (package page → Package settings →
-Change visibility), or `docker login ghcr.io` on the server with a token that has only
+The image `ghcr.io/mgrubiyan/startpage` is published by CI on every push to `main`
+(tags `latest` and the commit SHA). The package is public, so the server pulls it without a
+login. For a private fork, run `docker login ghcr.io` on the server with a token that has only
 `read:packages`.
 
 ## 4. Backups
