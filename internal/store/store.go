@@ -23,6 +23,19 @@ type Bookmark struct {
 	URL   string
 }
 
+// Note is the free-form scratchpad; an instance has exactly one.
+type Note struct {
+	Text      string
+	UpdatedAt time.Time
+}
+
+// Task is an item on the to-do list.
+type Task struct {
+	ID    int64
+	Title string
+	Done  bool
+}
+
 // Service is an HTTP endpoint the monitor checks periodically.
 type Service struct {
 	ID   int64

@@ -24,6 +24,7 @@ are visible to Google.
 - **Painting of the day**: a public-domain (CC0) work from the Cleveland Museum of Art as the
   background, under a dark glass theme, with a caption linking to the museum's page.
 - **Bookmarks and settings**: stored in Postgres.
+- **Tasks and notes**: a to-do list and a scratchpad that saves itself as you type.
 - **Service monitor**: background prober with latency, last error and 24h uptime per service.
 - **Single-user login**: password, server-side sessions, rate-limited.
 - **Demo mode**: a public read-only instance with no login, for showing the project.
@@ -71,6 +72,16 @@ talks only to its own origin and the CSP stays `img-src 'self'`.
   after a backoff instead of on every request.
 - The image URL carries the painting's id, so the browser caches it for a day (`private`,
   since a personal instance is behind the login). Any other URL stays `no-store`.
+
+**Notes.** The scratchpad saves itself 0.7 s after you stop typing, when it loses focus, and
+when the tab is hidden (as a `keepalive` request, so closing the tab doesn't lose the last words).
+- One save is in flight at a time, and the next one sends whatever was typed meanwhile. Two
+  saves can't land out of order and leave older text on the server.
+- Every new tab is a start page, so several copies are usually open. A tab re-reads the note
+  when it becomes visible, but never overwrites the textarea while it has edits the server
+  hasn't seen. With two windows edited side by side, the last save wins.
+- The text is stored as typed: no trimming, line breaks and tabs kept, CRLF turned into LF,
+  other control characters refused. 10 000 characters, checked by the API and by a `CHECK`.
 
 **Upstream caching.** `cache.Cache[V]` wraps every external API.
 - Concurrent misses for the same key collapse into one upstream call (`singleflight`).
@@ -169,6 +180,11 @@ are open and writes are refused). JSON in, JSON out.
 | `GET` / `PUT` | `/api/settings` | `{"searchEngine": "g", "city": "Санкт-Петербург"}` |
 | `GET` / `POST` | `/api/bookmarks` | list / add `{"title", "url"}` |
 | `DELETE` | `/api/bookmarks/{id}` | |
+| `GET` / `PUT` | `/api/note` | the scratchpad: `{"text"}` → `{"text", "updatedAt"}` |
+| `GET` / `POST` | `/api/tasks` | open tasks first, then done ones / add `{"title"}` |
+| `PATCH` | `/api/tasks/{id}` | `{"done": true}` or `false` |
+| `DELETE` | `/api/tasks/{id}` | |
+| `DELETE` | `/api/tasks/completed` | removes every done task: `{"deleted": n}` |
 | `GET` / `POST` | `/api/services` | list with last check and 24h uptime / add `{"name", "url"}` |
 | `DELETE` | `/api/services/{id}` | |
 | `GET` | `/api/weather` | current weather for the configured city |

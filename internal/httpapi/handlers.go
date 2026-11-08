@@ -18,6 +18,13 @@ type Store interface {
 	Bookmarks(ctx context.Context) ([]store.Bookmark, error)
 	AddBookmark(ctx context.Context, b store.Bookmark) (store.Bookmark, error)
 	DeleteBookmark(ctx context.Context, id int64) error
+	Note(ctx context.Context) (store.Note, error)
+	SaveNote(ctx context.Context, text string) (store.Note, error)
+	Tasks(ctx context.Context) ([]store.Task, error)
+	AddTask(ctx context.Context, title string) (store.Task, error)
+	SetTaskDone(ctx context.Context, id int64, done bool) (store.Task, error)
+	DeleteTask(ctx context.Context, id int64) error
+	DeleteDoneTasks(ctx context.Context) (int64, error)
 	ServiceStatuses(ctx context.Context, since time.Time) ([]store.ServiceStatus, error)
 	AddService(ctx context.Context, s store.Service) (store.Service, error)
 	DeleteService(ctx context.Context, id int64) error

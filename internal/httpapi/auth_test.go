@@ -49,7 +49,7 @@ func TestEveryPrivateRouteRequiresSession(t *testing.T) {
 		method, path, _ := strings.Cut(rt.pattern, " ")
 		path = strings.ReplaceAll(path, "{id}", "1")
 		body := ""
-		if method == http.MethodPost || method == http.MethodPut {
+		if method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch {
 			body = "{}"
 		}
 		t.Run(rt.pattern, func(t *testing.T) {

@@ -30,6 +30,8 @@ type fakeStore struct {
 	settings  store.Settings
 	bookmarks []store.Bookmark
 	statuses  []store.ServiceStatus
+	note      store.Note
+	tasks     []store.Task
 	nextID    int64
 	since     time.Time
 	failWith  error
@@ -90,6 +92,87 @@ func (f *fakeStore) DeleteBookmark(_ context.Context, id int64) error {
 		}
 	}
 	return store.ErrNotFound
+}
+
+func (f *fakeStore) Note(context.Context) (store.Note, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.note, f.failWith
+}
+
+func (f *fakeStore) SaveNote(_ context.Context, text string) (store.Note, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failWith != nil {
+		return store.Note{}, f.failWith
+	}
+	f.note = store.Note{Text: text, UpdatedAt: testNow}
+	return f.note, nil
+}
+
+func (f *fakeStore) Tasks(context.Context) ([]store.Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]store.Task(nil), f.tasks...), f.failWith
+}
+
+func (f *fakeStore) AddTask(_ context.Context, title string) (store.Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failWith != nil {
+		return store.Task{}, f.failWith
+	}
+	f.nextID++
+	t := store.Task{ID: f.nextID, Title: title}
+	f.tasks = append(f.tasks, t)
+	return t, nil
+}
+
+func (f *fakeStore) SetTaskDone(_ context.Context, id int64, done bool) (store.Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failWith != nil {
+		return store.Task{}, f.failWith
+	}
+	for i := range f.tasks {
+		if f.tasks[i].ID == id {
+			f.tasks[i].Done = done
+			return f.tasks[i], nil
+		}
+	}
+	return store.Task{}, store.ErrNotFound
+}
+
+func (f *fakeStore) DeleteTask(_ context.Context, id int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failWith != nil {
+		return f.failWith
+	}
+	for i, t := range f.tasks {
+		if t.ID == id {
+			f.tasks = append(f.tasks[:i], f.tasks[i+1:]...)
+			return nil
+		}
+	}
+	return store.ErrNotFound
+}
+
+func (f *fakeStore) DeleteDoneTasks(context.Context) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failWith != nil {
+		return 0, f.failWith
+	}
+	kept := f.tasks[:0]
+	for _, t := range f.tasks {
+		if !t.Done {
+			kept = append(kept, t)
+		}
+	}
+	n := int64(len(f.tasks) - len(kept))
+	f.tasks = kept
+	return n, nil
 }
 
 func (f *fakeStore) ServiceStatuses(_ context.Context, since time.Time) ([]store.ServiceStatus, error) {
