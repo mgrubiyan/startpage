@@ -18,9 +18,11 @@ type PickFunc func(ctx context.Context, day string) (Artwork, error)
 
 // Daily holds the painting of the current UTC day and loads it once a day.
 //
-// If a load fails, the previous painting stays up and the load is retried
-// only after a backoff, so a museum outage neither blanks the background nor
-// makes every request wait on the timeout. Concurrent loads are collapsed.
+// Once a painting is held, nobody waits for a download: on a new day the
+// previous painting is served while the next one loads in the background. If
+// a load fails, it is retried only after a backoff, so a museum outage neither
+// blanks the background nor sends every request to the museum. Concurrent
+// loads of a day are collapsed.
 type Daily struct {
 	pick    PickFunc
 	now     func() time.Time
@@ -38,10 +40,11 @@ type Daily struct {
 
 // NewDaily returns a Daily that loads with pick.
 func NewDaily(pick PickFunc) *Daily {
-	return &Daily{pick: pick, now: time.Now, timeout: time.Minute, backoff: 10 * time.Minute}
+	return &Daily{pick: pick, now: time.Now, timeout: 2 * time.Minute, backoff: 10 * time.Minute}
 }
 
-// Today returns today's painting, or the last one that loaded if today's can't be had.
+// Today returns today's painting, or the last one that loaded while today's
+// is loading or can't be had. It blocks only while no painting has loaded yet.
 func (d *Daily) Today(ctx context.Context) (Artwork, error) {
 	day := d.now().UTC().Format(time.DateOnly)
 
@@ -51,16 +54,32 @@ func (d *Daily) Today(ctx context.Context) (Artwork, error) {
 	if have && curDay == day {
 		return cur, nil
 	}
-	if !failedAt.IsZero() && d.now().Sub(failedAt) < d.backoff {
-		if have {
-			return cur, nil
+	backingOff := !failedAt.IsZero() && d.now().Sub(failedAt) < d.backoff
+	if have {
+		if !backingOff {
+			d.load(ctx, day) // in the background; the result lands in d.cur
 		}
+		return cur, nil
+	}
+	if backingOff {
 		return Artwork{}, ErrUnavailable
 	}
 
-	// Detached from the caller, like internal/cache: a closed tab must not
-	// cancel the download that everyone else is waiting for.
-	ch := d.group.DoChan(day, func() (any, error) {
+	select {
+	case <-ctx.Done():
+		return Artwork{}, ctx.Err()
+	case res := <-d.load(ctx, day):
+		if res.Err != nil {
+			return Artwork{}, res.Err
+		}
+		return res.Val.(Artwork), nil //nolint:forcetypeassert // only load puts values in the group
+	}
+}
+
+// load starts (or joins) the load of day. It runs detached from the caller,
+// like internal/cache: a closed tab must not cancel a download others share.
+func (d *Daily) load(ctx context.Context, day string) <-chan singleflight.Result {
+	return d.group.DoChan(day, func() (any, error) {
 		d.mu.Lock()
 		if d.have && d.day == day { // another load finished since our read
 			a := d.cur
@@ -79,20 +98,11 @@ func (d *Daily) Today(ctx context.Context) (Artwork, error) {
 			d.failedAt = d.now()
 			return nil, err
 		}
-		d.cur, d.have, d.day, d.failedAt = a, true, day, time.Time{}
+		// Loads of two days can overlap around midnight; the older one must
+		// not replace the newer painting when it finishes last.
+		if !d.have || day >= d.day {
+			d.cur, d.have, d.day, d.failedAt = a, true, day, time.Time{}
+		}
 		return a, nil
 	})
-
-	select {
-	case <-ctx.Done():
-		return Artwork{}, ctx.Err()
-	case res := <-ch:
-		if res.Err == nil {
-			return res.Val.(Artwork), nil //nolint:forcetypeassert // only this function puts values in the group
-		}
-		if have {
-			return cur, nil
-		}
-		return Artwork{}, res.Err
-	}
 }

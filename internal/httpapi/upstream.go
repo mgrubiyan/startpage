@@ -170,19 +170,31 @@ func (a *api) getArtImage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	switch v := r.URL.Query().Get("v"); v {
+	case strconv.Itoa(aw.ID):
+		// The URL /api/art handed out for this painting: cacheable, but only by
+		// the browser, since on a personal instance the image is behind the login.
+		w.Header().Set("Cache-Control", "private, max-age=86400, immutable")
+	case "":
+		// No version asked for: today's image, uncached (no-store from the middleware).
+	default:
+		// The painting changed since the page asked for it. Serving today's image
+		// here would put it under yesterday's caption; the page keeps what it has.
+		writeError(w, http.StatusNotFound, "painting changed")
+		return
+	}
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Content-Length", strconv.Itoa(len(aw.Image)))
-	// Only the URL that /api/art handed out for this painting may be cached,
-	// and only by the browser: on a personal instance the image is behind the
-	// login. Any other URL keeps no-store, so a stale v can't pin today's image.
-	if r.URL.Query().Get("v") == strconv.Itoa(aw.ID) {
-		w.Header().Set("Cache-Control", "private, max-age=86400, immutable")
-	}
+	// Several MB can take longer than the server's 20s WriteTimeout on a slow link.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(2 * time.Minute))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(aw.Image)
 }
 
 func (a *api) artwork(w http.ResponseWriter, r *http.Request) (art.Artwork, bool) {
+	// Before the first painting has loaded, Today waits for the download, which
+	// can outlast the server's 20s WriteTimeout. (Unsupported writers just skip this.)
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(3 * time.Minute))
 	aw, err := a.art.Today(r.Context())
 	switch {
 	case errors.Is(err, art.ErrUnavailable):

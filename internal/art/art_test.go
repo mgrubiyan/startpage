@@ -170,6 +170,34 @@ func TestPickRefusesBadImages(t *testing.T) {
 	}
 }
 
+// Pages overlap in a small department; a retry must try another image, not the broken one again.
+func TestPickRetriesWithAnotherImage(t *testing.T) {
+	m := newMuseum(t)
+	m.records = []map[string]any{
+		m.painting(1, "3400", "2000", "1000", ""),
+		m.painting(2, "3400", "2000", "1000", ""),
+	}
+	var mu sync.Mutex
+	var paths []string
+	m.image = func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		paths = append(paths, r.URL.Path)
+		if len(paths) == 1 {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write(jpeg)
+	}
+	a, err := m.client().Pick(context.Background(), "2026-11-08")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 2 || paths[0] == paths[1] || !strings.Contains(paths[1], fmt.Sprintf("/%d_", a.ID)) {
+		t.Fatalf("downloads %v, picked %d", paths, a.ID)
+	}
+}
+
 // A CDN redirect must not walk the server into fetching an arbitrary host.
 func TestPickRefusesRedirectOffTheMuseum(t *testing.T) {
 	var hits atomic.Int32

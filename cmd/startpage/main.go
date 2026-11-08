@@ -115,7 +115,8 @@ func run() error {
 	ratesClient := rates.New(upstream)
 	suggestClient := suggest.New(upstream)
 	// Its own client: a 3–6 MB painting needs longer than the 10 s API timeout.
-	artwork := art.NewDaily(art.New(&http.Client{Timeout: 45 * time.Second}).Pick)
+	// Per request; one whole load (up to 3 attempts) gets 2 min in art.Daily.
+	artwork := art.NewDaily(art.New(&http.Client{Timeout: 30 * time.Second}).Pick)
 	go func() {
 		// Load ahead of visitors, at startup and soon after each UTC midnight,
 		// so nobody waits for the download. Today is a no-op once loaded.

@@ -93,6 +93,7 @@ const stopTimers = () => { timers.forEach(clearInterval); timers = []; };
 // ---------- login ----------
 function showLogin() {
   stopTimers();
+  clearArt(); // the painting comes from a private route; the login screen stays plain
   $('app').hidden = true;
   $('login').hidden = false;
   $('login-password').focus();
@@ -459,8 +460,8 @@ async function loadArt() {
     await next.decode();
     img.src = art.image;
     const caption = $('art-caption');
-    caption.textContent = [art.artist, art.title + (art.date ? ', ' + art.date : '')]
-      .filter(Boolean).join(' — ');
+    const work = [art.title, art.date].filter(Boolean).join(', ');
+    caption.textContent = [art.artist, work].filter(Boolean).join(' — ');
     const href = art.url && safeUrl(art.url);
     if (href) caption.href = href; else caption.removeAttribute('href');
     // Long titles are cut off in the corner; the tooltip has them in full.
@@ -468,6 +469,12 @@ async function loadArt() {
     caption.hidden = false;
     document.body.classList.add('has-art');
   } catch { /* plain background */ }
+}
+
+function clearArt() {
+  document.body.classList.remove('has-art');
+  $('art-caption').hidden = true;
+  $('art-img').removeAttribute('src');
 }
 
 // ---------- boot ----------

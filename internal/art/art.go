@@ -144,6 +144,7 @@ func (c *Client) Pick(ctx context.Context, day string) (Artwork, error) {
 	seed := sum / len(departments) % total
 
 	err = errors.New("art: no suitable painting found")
+	tried := map[string]bool{}
 	for i := range attempts {
 		page, listErr := c.list(ctx, dept, (seed+i*pageSize)%total, pageSize, "id,title,creators,creation_date,images,url")
 		if listErr != nil {
@@ -151,7 +152,8 @@ func (c *Client) Pick(ctx context.Context, day string) (Artwork, error) {
 		}
 		var usable []record
 		for _, r := range page.Data {
-			if c.usable(r) {
+			// In a small department the pages overlap: skip images that already failed.
+			if c.usable(r) && !tried[r.Images.Print.URL] {
 				usable = append(usable, r)
 			}
 		}
@@ -159,6 +161,7 @@ func (c *Client) Pick(ctx context.Context, day string) (Artwork, error) {
 			continue
 		}
 		r := usable[seed%len(usable)]
+		tried[r.Images.Print.URL] = true
 		img, imgErr := c.image(ctx, r.Images.Print.URL)
 		if imgErr != nil {
 			if ctx.Err() != nil {

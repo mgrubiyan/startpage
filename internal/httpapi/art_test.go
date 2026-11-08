@@ -44,8 +44,6 @@ func TestArtImageCaching(t *testing.T) {
 		path, cacheControl string
 	}{
 		{"/api/art/image?v=42", "private, max-age=86400, immutable"},
-		// A URL from yesterday's /api/art must not cache today's image under it.
-		{"/api/art/image?v=41", "no-store"},
 		{"/api/art/image", "no-store"},
 	}
 	for _, tt := range tests {
@@ -59,6 +57,18 @@ func TestArtImageCaching(t *testing.T) {
 		if cc := rec.Header().Get("Cache-Control"); cc != tt.cacheControl {
 			t.Errorf("GET %s: Cache-Control = %q, want %q", tt.path, cc, tt.cacheControl)
 		}
+	}
+}
+
+// A URL from yesterday's /api/art must not get today's image: it would show
+// under yesterday's caption, and be cached under the wrong v.
+func TestArtImageForAnotherPaintingIsNotFound(t *testing.T) {
+	rec := newTestEnv(t).do(t, "GET", "/api/art/image?v=41", "")
+	if rec.Code != http.StatusNotFound || rec.Header().Get("Content-Type") == "image/jpeg" {
+		t.Fatalf("GET stale v = %d %q, want 404 JSON", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("Cache-Control = %q", cc)
 	}
 }
 
