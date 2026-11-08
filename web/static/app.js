@@ -463,7 +463,8 @@ async function loadArt() {
       .filter(Boolean).join(' — ');
     const href = art.url && safeUrl(art.url);
     if (href) caption.href = href; else caption.removeAttribute('href');
-    caption.title = 'Cleveland Museum of Art, Open Access (CC0)';
+    // Long titles are cut off in the corner; the tooltip has them in full.
+    caption.title = caption.textContent + '\nCleveland Museum of Art, Open Access (CC0)';
     caption.hidden = false;
     document.body.classList.add('has-art');
   } catch { /* plain background */ }

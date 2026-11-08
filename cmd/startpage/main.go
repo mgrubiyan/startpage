@@ -117,9 +117,19 @@ func run() error {
 	// Its own client: a 3–6 MB painting needs longer than the 10 s API timeout.
 	artwork := art.NewDaily(art.New(&http.Client{Timeout: 45 * time.Second}).Pick)
 	go func() {
-		// Warm up, so the first visitor of the session doesn't wait for the download.
-		if _, err := artwork.Today(ctx); err != nil && ctx.Err() == nil {
-			logger.Warn("painting of the day not loaded", "err", err)
+		// Load ahead of visitors, at startup and soon after each UTC midnight,
+		// so nobody waits for the download. Today is a no-op once loaded.
+		tick := time.NewTicker(30 * time.Minute)
+		defer tick.Stop()
+		for {
+			if _, err := artwork.Today(ctx); err != nil && ctx.Err() == nil {
+				logger.Warn("painting of the day not loaded", "err", err)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+			}
 		}
 	}()
 
