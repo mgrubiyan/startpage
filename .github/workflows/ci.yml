@@ -46,6 +46,10 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.13.2
+          # Build the linter with `go install` through the Go module proxy instead of
+          # downloading the release binary from GitHub Releases. lint is a required
+          # check on main, so a Releases outage (504s on 2026-11-08) must not block merges.
+          install-mode: goinstall
 
   docker:
     runs-on: ubuntu-latest
