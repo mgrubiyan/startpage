@@ -190,6 +190,7 @@ type testEnv struct {
 	weather        *fakeSource[weather.Report]
 	rates          *fakeSource[rates.Rates]
 	suggest        *fakeSource[[]string]
+	art            *fakeArt
 	servicesChange int
 	pingErr        error
 }
@@ -202,6 +203,7 @@ func newTestEnv(t *testing.T, opts ...func(*Deps)) *testEnv {
 		weather: &fakeSource[weather.Report]{},
 		rates:   &fakeSource[rates.Rates]{},
 		suggest: &fakeSource[[]string]{value: []string{}},
+		art:     &fakeArt{artwork: testArtwork},
 	}
 	d := Deps{
 		Logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -210,6 +212,7 @@ func newTestEnv(t *testing.T, opts ...func(*Deps)) *testEnv {
 		Weather:           env.weather,
 		Rates:             env.rates,
 		Suggest:           env.suggest,
+		Art:               env.art,
 		Auth:              env.auth,
 		LoginLimiter:      auth.NewLimiter(5, time.Minute),
 		Ping:              func(context.Context) error { return env.pingErr },

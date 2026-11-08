@@ -8,6 +8,9 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- Painting of the day, proxied by the server; stays empty if it can't load. -->
+  <div class="backdrop" aria-hidden="true"><img id="art-img" alt=""></div>
+
   <section id="login" class="login" hidden>
     <form id="login-form" class="login-card" autocomplete="on">
       <h1>Startpage</h1>
@@ -93,6 +96,8 @@
       <span id="svc-error" class="error"></span>
     </form>
   </main>
+  <!-- Last, so on narrow screens it sits under the content instead of over it. -->
+  <a id="art-caption" class="art-caption" target="_blank" rel="noopener noreferrer" hidden></a>
   <script src="app.js"></script>
 </body>
 </html>

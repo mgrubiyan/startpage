@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mgrubiyan/startpage/internal/art"
 	"github.com/mgrubiyan/startpage/internal/auth"
 	"github.com/mgrubiyan/startpage/internal/cache"
 	"github.com/mgrubiyan/startpage/internal/config"
@@ -113,6 +114,14 @@ func run() error {
 	weatherClient := weather.New(upstream)
 	ratesClient := rates.New(upstream)
 	suggestClient := suggest.New(upstream)
+	// Its own client: a 3–6 MB painting needs longer than the 10 s API timeout.
+	artwork := art.NewDaily(art.New(&http.Client{Timeout: 45 * time.Second}).Pick)
+	go func() {
+		// Warm up, so the first visitor of the session doesn't wait for the download.
+		if _, err := artwork.Today(ctx); err != nil && ctx.Err() == nil {
+			logger.Warn("painting of the day not loaded", "err", err)
+		}
+	}()
 
 	handler := httpapi.New(httpapi.Deps{
 		Logger:  logger,
@@ -124,6 +133,7 @@ func run() error {
 			return ratesClient.Latest(ctx)
 		}),
 		Suggest:           cache.New(time.Hour, suggestClient.Suggest, cache.WithLoadTimeout(3*time.Second)),
+		Art:               artwork,
 		Auth:              authService,
 		LoginLimiter:      auth.NewLimiter(5, time.Minute),
 		SecureCookie:      cfg.SecureCookie,
