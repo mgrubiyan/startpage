@@ -23,3 +23,9 @@
 	import common
 	reverse_proxy startpage-demo:8080
 }
+
+# The bare domain and www send visitors to the demo. 302, not 301: browsers
+# cache a permanent redirect, and the apex may get its own page later.
+{$APEX_DOMAIN}, www.{$APEX_DOMAIN} {
+	redir https://{$DEMO_DOMAIN}{uri} 302
+}

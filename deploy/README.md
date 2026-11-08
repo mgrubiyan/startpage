@@ -9,7 +9,8 @@ Two compose projects on one server:
 
 ```
 internet ──443──▶ caddy ──▶ startpage        (HOME_DOMAIN, password login)
-                        └─▶ startpage-demo   (DEMO_DOMAIN, STARTPAGE_DEMO=true)
+                        ├─▶ startpage-demo   (DEMO_DOMAIN, STARTPAGE_DEMO=true)
+                        └─▶ 302 to DEMO_DOMAIN (APEX_DOMAIN and www.APEX_DOMAIN)
                                  │
                                  ▼
                              postgres: role+db startpage, role+db startpage_demo
@@ -25,8 +26,9 @@ internet ──443──▶ caddy ──▶ startpage        (HOME_DOMAIN, passw
 
 ## 1. DNS
 
-Point A records for both hostnames (e.g. `home.example.com`, `demo.example.com`) at the
-server's IP before starting Caddy, or the certificate requests fail.
+Point A records for every hostname (e.g. `home.example.com`, `demo.example.com`,
+`example.com` and `www.example.com`) at the server's IP before starting Caddy, or the
+certificate requests fail. A wildcard `*` record plus one for `@` covers them all.
 
 ## 2. Infra
 
