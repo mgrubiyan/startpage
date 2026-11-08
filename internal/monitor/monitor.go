@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,13 @@ type Store interface {
 	Services(ctx context.Context) ([]store.Service, error)
 	RecordChecks(ctx context.Context, checks []store.Check) error
 	PruneChecks(ctx context.Context, before time.Time) (int64, error)
+	ServiceStatuses(ctx context.Context, since time.Time) ([]store.ServiceStatus, error)
+}
+
+// Notifier delivers alerts when a service goes down or comes back;
+// *telegram.Bot implements it.
+type Notifier interface {
+	Send(ctx context.Context, text string) error
 }
 
 // Config tunes the monitor.
@@ -34,6 +42,7 @@ type Config struct {
 	Timeout   time.Duration // per-probe timeout
 	Workers   int           // max concurrent probes
 	Retention time.Duration // how long check history is kept
+	Notifier  Notifier      // nil: no alerts
 }
 
 const (
@@ -41,7 +50,20 @@ const (
 	maxBodyBytes  = 64 << 10
 	maxErrorChars = 200
 	pruneEvery    = time.Hour
+
+	// downAfter failed checks in a row make a service down: one lost probe is not an outage.
+	downAfter   = 2
+	sendTimeout = 10 * time.Second
+	// maxPending bounds the alerts kept for a retry while Telegram is unreachable.
+	maxPending = 50
 )
+
+// health is what the monitor remembers about a service between rounds.
+type health struct {
+	fails int       // failed checks in a row
+	down  bool      // a "down" alert is due or was sent
+	since time.Time // first failed check of the outage; zero when unknown
+}
 
 // Monitor runs probe rounds on a ticker or on demand.
 type Monitor struct {
@@ -50,6 +72,10 @@ type Monitor struct {
 	cfg     Config
 	client  *http.Client
 	trigger chan struct{}
+
+	// Touched only by the Run goroutine.
+	health  map[int64]*health
+	pending []string // alerts not yet delivered
 }
 
 // New returns a Monitor. Zero Config fields get sensible defaults.
@@ -80,6 +106,7 @@ func New(s Store, logger *slog.Logger, cfg Config) *Monitor {
 			},
 		},
 		trigger: make(chan struct{}, 1),
+		health:  make(map[int64]*health),
 	}
 }
 
@@ -99,6 +126,9 @@ func (m *Monitor) Run(ctx context.Context) {
 	ticker := time.NewTicker(m.cfg.Interval)
 	defer ticker.Stop()
 
+	if m.cfg.Notifier != nil {
+		m.seed(ctx)
+	}
 	var lastPrune time.Time
 	for {
 		m.round(ctx)
@@ -133,6 +163,110 @@ func (m *Monitor) round(ctx context.Context) {
 	}
 	if err := m.store.RecordChecks(ctx, checks); err != nil {
 		m.logger.Error("monitor: record checks", "err", err)
+	}
+	if m.cfg.Notifier != nil {
+		m.pending = append(m.pending, m.transitions(services, checks)...)
+		m.flush(ctx)
+	}
+}
+
+// seed starts from each service's last recorded check, so a restart neither
+// repeats the alert for a service that was already down nor misses its recovery.
+// A service without checks starts as up.
+func (m *Monitor) seed(ctx context.Context) {
+	statuses, err := m.store.ServiceStatuses(ctx, time.Now())
+	if err != nil {
+		if ctx.Err() == nil {
+			m.logger.Warn("monitor: no previous state for alerts", "err", err)
+		}
+		return
+	}
+	for _, st := range statuses {
+		if st.Last != nil && !st.Last.OK {
+			m.health[st.ID] = &health{fails: downAfter, down: true}
+		}
+	}
+}
+
+// transitions updates each service's health with this round's checks and
+// returns an alert for every service that went down or came back.
+func (m *Monitor) transitions(services []store.Service, checks []store.Check) []string {
+	var alerts []string
+	listed := make(map[int64]bool, len(services))
+	for i, svc := range services {
+		listed[svc.ID] = true
+		c := checks[i]
+		h := m.health[svc.ID]
+		if h == nil {
+			h = &health{}
+			m.health[svc.ID] = h
+		}
+		if c.OK {
+			if h.down {
+				alerts = append(alerts, upAlert(svc.Name, h.since, c.CheckedAt))
+			}
+			*h = health{}
+			continue
+		}
+		if h.fails == 0 {
+			h.since = c.CheckedAt
+		}
+		h.fails++
+		if h.fails >= downAfter && !h.down {
+			h.down = true
+			alerts = append(alerts, fmt.Sprintf("🔴 %s недоступен: %s", svc.Name, c.Error))
+		}
+	}
+	// A deleted service is forgotten, so one added later starts clean.
+	for id := range m.health {
+		if !listed[id] {
+			delete(m.health, id)
+		}
+	}
+	return alerts
+}
+
+// flush sends the pending alerts as one message. On failure they stay pending
+// and go out with the next round, so a network blip doesn't lose an outage.
+func (m *Monitor) flush(ctx context.Context) {
+	if len(m.pending) == 0 {
+		return
+	}
+	if len(m.pending) > maxPending {
+		m.pending = m.pending[len(m.pending)-maxPending:]
+	}
+	sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
+	defer cancel()
+	if err := m.cfg.Notifier.Send(sendCtx, strings.Join(m.pending, "\n")); err != nil {
+		if ctx.Err() == nil {
+			m.logger.Error("monitor: send alert, retrying next round", "err", err, "pending", len(m.pending))
+		}
+		return
+	}
+	m.pending = nil
+}
+
+func upAlert(name string, since, at time.Time) string {
+	msg := "🟢 " + name + " снова работает"
+	if !since.IsZero() {
+		msg += " (не работал " + humanize(at.Sub(since)) + ")"
+	}
+	return msg
+}
+
+// humanize formats an outage length in Russian, to the minute.
+func humanize(d time.Duration) string {
+	if d < time.Minute {
+		return "меньше минуты"
+	}
+	mins := int(d.Round(time.Minute).Minutes())
+	switch h, m := mins/60, mins%60; {
+	case h == 0:
+		return fmt.Sprintf("%d мин", m)
+	case m == 0:
+		return fmt.Sprintf("%d ч", h)
+	default:
+		return fmt.Sprintf("%d ч %d мин", h, m)
 	}
 }
 

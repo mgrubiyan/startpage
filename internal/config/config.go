@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"time"
 )
@@ -21,7 +22,14 @@ type Config struct {
 	LogLevel        slog.Level
 	// Demo runs a public read-only showcase: no login, every write refused.
 	Demo bool
+	// Telegram alerts from the monitor; both empty means no alerts.
+	TelegramToken  string
+	TelegramChatID string
 }
+
+// telegramToken is the shape of a token from @BotFather: "<bot id>:<secret>".
+// Checked so a paste error fails at startup, not at the first outage.
+var telegramToken = regexp.MustCompile(`^[0-9]+:[A-Za-z0-9_-]+$`)
 
 const (
 	minPasswordLen   = 8
@@ -69,6 +77,19 @@ func Load(getenv func(string) string) (Config, error) {
 	if cfg.MonitorInterval, err = parseDuration(getenv, "STARTPAGE_MONITOR_INTERVAL", time.Minute, 5*time.Second); err != nil {
 		errs = append(errs, err)
 	}
+	cfg.TelegramToken, cfg.TelegramChatID = getenv("TELEGRAM_BOT_TOKEN"), getenv("TELEGRAM_CHAT_ID")
+	switch {
+	case cfg.TelegramToken == "" && cfg.TelegramChatID == "":
+	case cfg.Demo:
+		// The demo seeds a service that is always down; its alerts would be noise.
+		errs = append(errs, errors.New("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are for a real instance, not the demo"))
+	case cfg.TelegramToken == "" || cfg.TelegramChatID == "":
+		errs = append(errs, errors.New("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set together"))
+	case !telegramToken.MatchString(cfg.TelegramToken):
+		// Never echo the value: it is a secret.
+		errs = append(errs, errors.New("TELEGRAM_BOT_TOKEN doesn't look like a token from @BotFather (digits:secret)"))
+	}
+
 	if err = cfg.LogLevel.UnmarshalText([]byte(withDefault(getenv("LOG_LEVEL"), "info"))); err != nil {
 		errs = append(errs, fmt.Errorf("LOG_LEVEL: %w", err))
 	}

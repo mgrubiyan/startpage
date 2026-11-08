@@ -22,6 +22,9 @@ services:
       STARTPAGE_PASSWORD: ${STARTPAGE_PASSWORD:?set STARTPAGE_PASSWORD in .env}
       STARTPAGE_SECURE_COOKIE: "true"
       STARTPAGE_TRUST_PROXY: "true"
+      # Optional monitor alerts; only here, the demo refuses them.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
 
   startpage-demo:

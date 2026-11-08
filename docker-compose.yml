@@ -25,6 +25,8 @@ services:
       STARTPAGE_SECURE_COOKIE: ${STARTPAGE_SECURE_COOKIE:-false}
       STARTPAGE_TRUST_PROXY: ${STARTPAGE_TRUST_PROXY:-false}
       STARTPAGE_MONITOR_INTERVAL: ${STARTPAGE_MONITOR_INTERVAL:-1m}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     # Lets the monitor reach services on the Docker host as http://host.docker.internal:PORT
     extra_hosts:

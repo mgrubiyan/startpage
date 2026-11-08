@@ -24,7 +24,8 @@ are visible to Google.
 - **Painting of the day**: a public-domain (CC0) work from the Cleveland Museum of Art as the
   background, under a dark glass theme, with a caption linking to the museum's page.
 - **Bookmarks and settings**: stored in Postgres.
-- **Service monitor**: background prober with latency, last error and 24h uptime per service.
+- **Service monitor**: background prober with latency, last error and 24h uptime per service,
+  plus optional Telegram alerts when a service goes down or comes back.
 - **Single-user login**: password, server-side sessions, rate-limited.
 - **Demo mode**: a public read-only instance with no login, for showing the project.
 - **Chrome extension**: makes every new tab open the start page.
@@ -42,7 +43,8 @@ internal/weather         Open-Meteo geocoding + forecast client
 internal/rates           CBR daily rates client
 internal/suggest         search suggestions client (Google → DuckDuckGo fallback)
 internal/art             painting of the day: Cleveland Museum of Art Open Access client + daily holder
-internal/monitor         ticker-driven prober with a bounded worker pool
+internal/monitor         ticker-driven prober with a bounded worker pool, down/up alerts
+internal/telegram        Telegram Bot API client for the alerts
 internal/demo            monitor targets seeded into an empty demo database
 internal/store           domain types
 internal/store/postgres  pgx/v5 store, embedded SQL migrations
@@ -120,6 +122,16 @@ talks only to its own origin and the CSP stays `img-src 'self'`.
 - Results are written in one batch.
 - Check history older than 7 days is pruned hourly.
 - On shutdown, an interrupted round is dropped rather than recorded as a burst of false failures.
+- Telegram alerts (`TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`, off when unset):
+  - A service counts as down after 2 failed checks in a row, so one lost probe stays quiet.
+    Each outage alerts once, and the recovery message says how long it lasted.
+  - All changes from one round go out as one message. If Telegram can't be reached, they are kept
+    and sent with the next round.
+  - At startup the state comes from each service's last recorded check, so a deploy doesn't
+    repeat the alert for a service that is still down.
+  - Messages are plain text with service names only, never URLs. The token is never logged:
+    errors drop the request URL that contains it.
+  - The demo refuses these settings: it watches a service that is down on purpose.
 
 **Migrations.** Plain numbered `.sql` files embedded in the binary.
 - Applied at startup under `pg_advisory_lock`, so several replicas can start at once.
@@ -211,6 +223,8 @@ make run-demo   # the same, in read-only demo mode
 | `STARTPAGE_TRUST_PROXY` | `false` | use the last `X-Forwarded-For` entry as client IP |
 | `STARTPAGE_SESSION_TTL` | `720h` | session lifetime |
 | `STARTPAGE_MONITOR_INTERVAL` | `1m` | probe interval (min `5s`) |
+| `TELEGRAM_BOT_TOKEN` | (none) | bot token from @BotFather; enables monitor alerts |
+| `TELEGRAM_CHAT_ID` | (none) | chat to alert, set together with the token |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
 ### On a server
