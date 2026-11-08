@@ -127,10 +127,12 @@ talks only to its own origin and the CSP stays `img-src 'self'`.
     Each outage alerts once, and the recovery message says how long it lasted.
   - All changes from one round go out as one message. If Telegram can't be reached, they are kept
     and sent with the next round.
-  - At startup the state comes from each service's last recorded check, so a deploy doesn't
-    repeat the alert for a service that is still down.
-  - Messages are plain text with service names only, never URLs. The token is never logged:
-    errors drop the request URL that contains it.
+  - At startup the state comes from the checks of the last few rounds, so a deploy doesn't
+    repeat the alert for a service that is still down. A failure that wasn't reported yet still
+    is: when unsure, a duplicate alert beats a missed one.
+  - Messages are plain text: the service name and the probe error, which can name the host
+    (`connection refused` on `10.0.0.5:8081`). The token is never logged: errors drop the
+    request URL that contains it.
   - The demo refuses these settings: it watches a service that is down on purpose.
 
 **Migrations.** Plain numbered `.sql` files embedded in the binary.

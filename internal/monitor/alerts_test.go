@@ -91,7 +91,7 @@ func TestTransitions(t *testing.T) {
 		},
 		{
 			name: "down before a restart: no repeat, recovery still reported",
-			seed: []store.ServiceStatus{{Service: bot, Last: &store.Check{OK: false}}},
+			seed: []store.ServiceStatus{{Service: bot, Last: &store.Check{OK: false}, TotalChecks: 3}},
 			rounds: []round{
 				{checks: []store.Check{fail(bot, 0)}},
 				{checks: []store.Check{fail(bot, time.Minute)}},
@@ -105,6 +105,21 @@ func TestTransitions(t *testing.T) {
 				{checks: []store.Check{fail(bot, 0), fail(api, 0)}},
 				{checks: []store.Check{fail(bot, time.Minute), fail(api, time.Minute)},
 					want: []string{"🔴 bot недоступен: timeout", "🔴 api недоступен: timeout"}},
+			},
+		},
+		{
+			// One failure, or too few checks to be sure, is not a reported outage:
+			// staying quiet here would swallow it.
+			name: "unconfirmed failure before a restart: the next failure alerts",
+			seed: []store.ServiceStatus{
+				{Service: bot, Last: &store.Check{OK: false, CheckedAt: t0.Add(-time.Minute)}, TotalChecks: 3, OKChecks: 2},
+				{Service: api, Last: &store.Check{OK: false, CheckedAt: t0.Add(-time.Minute)}, TotalChecks: 1},
+			},
+			rounds: []round{
+				{checks: []store.Check{fail(bot, 0), fail(api, 0)},
+					want: []string{"🔴 bot недоступен: timeout", "🔴 api недоступен: timeout"}},
+				{checks: []store.Check{up(bot, 10*time.Minute), fail(api, 10*time.Minute)},
+					want: []string{"🟢 bot снова работает (не работал 11 мин)"}},
 			},
 		},
 	} {
@@ -121,6 +136,16 @@ func TestTransitions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSeedLooksBackAFewRounds(t *testing.T) {
+	fs := newFakeStore()
+	m := New(fs, quietLogger(), Config{Interval: time.Minute, Notifier: &fakeNotifier{}})
+	m.seed(context.Background())
+	want := time.Now().Add(-(downAfter + 1) * time.Minute)
+	if d := fs.since.Sub(want); d < -5*time.Second || d > 5*time.Second {
+		t.Errorf("seeded from checks since %s, want about %s", fs.since, want)
 	}
 }
 

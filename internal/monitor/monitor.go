@@ -170,11 +170,13 @@ func (m *Monitor) round(ctx context.Context) {
 	}
 }
 
-// seed starts from each service's last recorded check, so a restart neither
-// repeats the alert for a service that was already down nor misses its recovery.
-// A service without checks starts as up.
+// seed starts from the checks recorded before a restart, so a deploy neither
+// repeats the alert for a service that is still down nor misses its recovery.
+// When in doubt it errs towards a duplicate alert, never a missed one.
 func (m *Monitor) seed(ctx context.Context) {
-	statuses, err := m.store.ServiceStatuses(ctx, time.Now())
+	// The last few rounds tell a reported outage from one failure that wasn't yet.
+	window := time.Duration(downAfter+1) * m.cfg.Interval
+	statuses, err := m.store.ServiceStatuses(ctx, time.Now().Add(-window))
 	if err != nil {
 		if ctx.Err() == nil {
 			m.logger.Warn("monitor: no previous state for alerts", "err", err)
@@ -182,8 +184,15 @@ func (m *Monitor) seed(ctx context.Context) {
 		return
 	}
 	for _, st := range statuses {
-		if st.Last != nil && !st.Last.OK {
+		switch {
+		case st.Last == nil || st.Last.OK:
+			// Up, or never checked: starts clean.
+		case st.OKChecks == 0 && st.TotalChecks >= downAfter:
+			// Failing throughout the window: the "down" alert already went out.
 			m.health[st.ID] = &health{fails: downAfter, down: true}
+		default:
+			// A failure not confirmed yet: the next one alerts.
+			m.health[st.ID] = &health{fails: 1, since: st.Last.CheckedAt}
 		}
 	}
 }
