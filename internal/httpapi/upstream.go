@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/mgrubiyan/startpage/internal/art"
 	"github.com/mgrubiyan/startpage/internal/cache"
 	"github.com/mgrubiyan/startpage/internal/rates"
 	"github.com/mgrubiyan/startpage/internal/weather"
@@ -133,4 +135,75 @@ func (a *api) upstreamError(w http.ResponseWriter, r *http.Request, what string,
 	}
 	a.logger.WarnContext(r.Context(), "upstream failed", "upstream", what, "err", err)
 	writeError(w, http.StatusBadGateway, what+" unavailable")
+}
+
+// ArtSource returns the painting of the day; *art.Daily implements it.
+type ArtSource interface {
+	Today(ctx context.Context) (art.Artwork, error)
+}
+
+type artDTO struct {
+	Title  string `json:"title"`
+	Artist string `json:"artist"`
+	Date   string `json:"date"`
+	URL    string `json:"url"`
+	// Image changes with the painting, so the browser may cache it for the day.
+	Image string `json:"image"`
+}
+
+func (a *api) getArt(w http.ResponseWriter, r *http.Request) {
+	aw, ok := a.artwork(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, artDTO{
+		Title:  aw.Title,
+		Artist: aw.Artist,
+		Date:   aw.Date,
+		URL:    aw.URL,
+		Image:  "/api/art/image?v=" + strconv.Itoa(aw.ID),
+	})
+}
+
+func (a *api) getArtImage(w http.ResponseWriter, r *http.Request) {
+	aw, ok := a.artwork(w, r)
+	if !ok {
+		return
+	}
+	switch v := r.URL.Query().Get("v"); v {
+	case strconv.Itoa(aw.ID):
+		// The URL /api/art handed out for this painting: cacheable, but only by
+		// the browser, since on a personal instance the image is behind the login.
+		w.Header().Set("Cache-Control", "private, max-age=86400, immutable")
+	case "":
+		// No version asked for: today's image, uncached (no-store from the middleware).
+	default:
+		// The painting changed since the page asked for it. Serving today's image
+		// here would put it under yesterday's caption; the page keeps what it has.
+		writeError(w, http.StatusNotFound, "painting changed")
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Content-Length", strconv.Itoa(len(aw.Image)))
+	// Several MB can take longer than the server's 20s WriteTimeout on a slow link.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(2 * time.Minute))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(aw.Image)
+}
+
+func (a *api) artwork(w http.ResponseWriter, r *http.Request) (art.Artwork, bool) {
+	// Before the first painting has loaded, Today waits for the download, which
+	// can outlast the server's 20s WriteTimeout. (Unsupported writers just skip this.)
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(3 * time.Minute))
+	aw, err := a.art.Today(r.Context())
+	switch {
+	case errors.Is(err, art.ErrUnavailable):
+		// The museum failed moments ago and that was logged; the page just stays plain.
+		writeError(w, http.StatusServiceUnavailable, "art unavailable")
+		return art.Artwork{}, false
+	case err != nil:
+		a.upstreamError(w, r, "art", err)
+		return art.Artwork{}, false
+	}
+	return aw, true
 }

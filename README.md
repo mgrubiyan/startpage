@@ -18,6 +18,8 @@ are visible to Google.
 - **Search**: default engine plus prefixes (`g`, `y`, `d`, `gh`, `yt`, `w`), address detection,
   suggestions proxied from Google (DuckDuckGo fallback) with keyboard navigation.
 - **Weather and rates**: Open-Meteo and the CBR daily feed, cached server-side.
+- **Painting of the day**: a public-domain (CC0) work from the Cleveland Museum of Art as the
+  background, under a dark glass theme, with a caption linking to the museum's page.
 - **Bookmarks and settings**: stored in Postgres.
 - **Service monitor**: background prober with latency, last error and 24h uptime per service.
 - **Single-user login**: password, server-side sessions, rate-limited.
@@ -36,6 +38,7 @@ internal/fetch           shared HTTP client + JSON helper with body size limit
 internal/weather         Open-Meteo geocoding + forecast client
 internal/rates           CBR daily rates client
 internal/suggest         search suggestions client (Google → DuckDuckGo fallback)
+internal/art             painting of the day: Cleveland Museum of Art Open Access client + daily holder
 internal/monitor         ticker-driven prober with a bounded worker pool
 internal/demo            monitor targets seeded into an empty demo database
 internal/store           domain types
@@ -50,6 +53,21 @@ patterns, `log/slog`). Third-party dependencies are `pgx/v5`,
 `golang.org/x/sync/singleflight` and `golang.org/x/crypto/bcrypt`.
 
 ### Design notes
+
+**Painting of the day.** The server picks it and serves the image itself, so the browser still
+talks only to its own origin and the CSP stays `img-src 'self'`.
+- The pick is a hash of the UTC date: the same day gives the same painting on every instance and
+  after restarts. Days rotate between the museum's three easel-painting departments, because
+  it also files manuscript leaves and scrolls under "Painting".
+- Only large landscape works between 1.2:1 and 2:1 pass, so the image fills a screen without
+  losing most of itself to the crop.
+- Every URL from the museum's JSON is checked before use: images only from the museum's CDN
+  over https (redirects included), caption links only to clevelandart.org. The download is
+  capped at 8 MB and must sniff as JPEG.
+- `art.Daily` loads once a day. If the museum is down it keeps yesterday's painting and retries
+  after a backoff instead of on every request.
+- The image URL carries the painting's id, so the browser caches it for a day (`private`,
+  since a personal instance is behind the login). Any other URL stays `no-store`.
 
 **Upstream caching.** `cache.Cache[V]` wraps every external API.
 - Concurrent misses for the same key collapse into one upstream call (`singleflight`).
@@ -153,6 +171,8 @@ are open and writes are refused). JSON in, JSON out.
 | `GET` | `/api/weather` | current weather for the configured city |
 | `GET` | `/api/rates` | USD and EUR from the CBR, with previous values |
 | `GET` | `/api/suggest?q=` | search suggestions |
+| `GET` | `/api/art` | today's painting: `{"title", "artist", "date", "url", "image"}` |
+| `GET` | `/api/art/image?v=` | the painting as JPEG (the one non-JSON response) |
 | `GET` | `/healthz` | liveness + database ping (public) |
 
 ## Running

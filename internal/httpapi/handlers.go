@@ -71,6 +71,7 @@ type api struct {
 	weather WeatherSource
 	rates   RatesSource
 	suggest SuggestSource
+	art     ArtSource
 	auth    Authenticator
 	limiter RateLimiter
 	logger  *slog.Logger

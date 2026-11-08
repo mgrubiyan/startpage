@@ -19,6 +19,7 @@ type Deps struct {
 	Weather WeatherSource
 	Rates   RatesSource
 	Suggest SuggestSource
+	Art     ArtSource
 	Auth    Authenticator
 	// LoginLimiter throttles POST /api/login per client IP.
 	LoginLimiter RateLimiter
@@ -65,6 +66,8 @@ func (a *api) routes() []route {
 		{"GET /api/weather", a.getWeather, false},
 		{"GET /api/rates", a.getRates, false},
 		{"GET /api/suggest", a.getSuggestions, false},
+		{"GET /api/art", a.getArt, false},
+		{"GET /api/art/image", a.getArtImage, false},
 	}
 }
 
@@ -78,6 +81,7 @@ func New(d Deps) http.Handler {
 		weather:           d.Weather,
 		rates:             d.Rates,
 		suggest:           d.Suggest,
+		art:               d.Art,
 		auth:              d.Auth,
 		limiter:           d.LoginLimiter,
 		secureCookie:      d.SecureCookie,

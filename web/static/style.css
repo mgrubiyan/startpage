@@ -285,3 +285,82 @@ button, input, select { font: inherit; color: inherit; }
   text-align: center;
 }
 .demo-banner a { color: var(--text); }
+
+/* ---------- painting of the day ---------- */
+.backdrop { position: fixed; inset: 0; z-index: -1; overflow: hidden; }
+.backdrop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transform: scale(1.03);
+  transition: opacity .7s ease, transform 1.4s cubic-bezier(.2, .7, .2, 1);
+}
+/* Darker at the top and bottom, where the clock and the services list sit. */
+.backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity .7s ease;
+  background:
+    radial-gradient(ellipse at 50% 35%, rgba(0,0,0,0) 0%, rgba(0,0,0,.25) 100%),
+    linear-gradient(180deg, rgba(0,0,0,.42) 0%, rgba(0,0,0,.12) 38%, rgba(0,0,0,.12) 62%, rgba(0,0,0,.48) 100%);
+}
+.has-art .backdrop img { opacity: 1; transform: none; }
+.has-art .backdrop::after { opacity: 1; }
+
+/* Over a painting the page turns to dark glass, whatever the system theme:
+   light text on a blurred, tinted surface reads on bright and dark works alike. */
+body.has-art {
+  --surface: rgba(16, 16, 20, .5);
+  --text: #f5f5f7;
+  --muted: rgba(245, 245, 247, .78);
+  --border: rgba(255, 255, 255, .14);
+  --accent: #9db5ff;
+  --shadow: 0 8px 32px rgba(0, 0, 0, .28);
+  color-scheme: dark;
+}
+.has-art :is(.chip, .search input, .suggestions, .bookmarks a, .services li, .demo-banner,
+  .inline-form input, .settings input, .settings select, .login-card, .ghost:hover, .ghost[aria-pressed="true"]) {
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+.has-art :is(.time, .date, .section-head h2) { text-shadow: 0 1px 14px rgba(0, 0, 0, .5); }
+.has-art :is(.suggestions li:hover, .suggestions li[aria-selected="true"]) { background: rgba(255, 255, 255, .12); }
+.has-art .search input::placeholder { color: rgba(245, 245, 247, .55); }
+
+/* Under the content by default; pinned to the corner only where it fits beside the 760px column. */
+.art-caption {
+  display: block;
+  width: fit-content;
+  max-width: calc(100vw - 32px);
+  margin: -24px auto 24px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, .8);
+  text-decoration: none;
+  background: rgba(0, 0, 0, .3);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color .15s ease, background-color .15s ease;
+}
+.art-caption[href]:hover { color: #fff; background: rgba(0, 0, 0, .5); }
+@media (min-width: 1320px) {
+  .art-caption {
+    position: fixed;
+    right: 16px;
+    bottom: 14px;
+    z-index: 1;
+    margin: 0;
+    max-width: calc((100vw - 760px) / 2 - 32px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop img, .backdrop::after { transition: none; transform: none; }
+}

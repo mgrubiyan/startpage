@@ -93,6 +93,7 @@ const stopTimers = () => { timers.forEach(clearInterval); timers = []; };
 // ---------- login ----------
 function showLogin() {
   stopTimers();
+  clearArt(); // the painting comes from a private route; the login screen stays plain
   $('app').hidden = true;
   $('login').hidden = false;
   $('login-password').focus();
@@ -445,6 +446,37 @@ $('search').addEventListener('submit', (e) => {
   go();
 });
 
+// ---------- background ----------
+// Painting of the day. The server proxies the image, so the page still talks
+// only to its own origin. Any failure keeps the plain background.
+async function loadArt() {
+  const img = $('art-img');
+  try {
+    const art = await api('/api/art');
+    if (img.getAttribute('src') === art.image) return;
+    // Decode off-screen first: a failed download must not replace a good painting.
+    const next = new Image();
+    next.src = art.image;
+    await next.decode();
+    img.src = art.image;
+    const caption = $('art-caption');
+    const work = [art.title, art.date].filter(Boolean).join(', ');
+    caption.textContent = [art.artist, work].filter(Boolean).join(' — ');
+    const href = art.url && safeUrl(art.url);
+    if (href) caption.href = href; else caption.removeAttribute('href');
+    // Long titles are cut off in the corner; the tooltip has them in full.
+    caption.title = caption.textContent + '\nCleveland Museum of Art, Open Access (CC0)';
+    caption.hidden = false;
+    document.body.classList.add('has-art');
+  } catch { /* plain background */ }
+}
+
+function clearArt() {
+  document.body.classList.remove('has-art');
+  $('art-caption').hidden = true;
+  $('art-img').removeAttribute('src');
+}
+
 // ---------- boot ----------
 // Demo mode hides edit controls; the server refuses writes either way.
 async function loadMeta() {
@@ -469,7 +501,9 @@ async function boot() {
   loadRates();
   loadBookmarks();
   loadServices();
+  loadArt();
   stopTimers();
+  every(loadArt, 60 * 60 * 1000); // a tab left open overnight gets the next day's painting
   every(loadWeather, 10 * 60 * 1000);
   every(loadRates, 60 * 60 * 1000);
   every(loadServices, 30 * 1000);
