@@ -68,6 +68,22 @@ The image `ghcr.io/mgrubiyan/startpage` is published by CI on every push to `mai
 login. For a private fork, run `docker login ghcr.io` on the server with a token that has only
 `read:packages`.
 
+### Changing the password
+
+The login password is `STARTPAGE_PASSWORD` in `/opt/startpage/.env`; there is no reset by email,
+because whoever controls the server owns the instance. Set a new one and restart the personal
+instance (the demo is untouched):
+
+```sh
+cd /opt/startpage
+sed -i "s|^STARTPAGE_PASSWORD=.*|STARTPAGE_PASSWORD=$(openssl rand -base64 18 | tr '+/' '-_')|" .env
+grep STARTPAGE_PASSWORD .env   # the new password: save it in a password manager
+docker compose up -d startpage
+```
+
+At startup the app sees that the password changed and deletes every session, so all devices
+(and anyone who had the old password) are logged out.
+
 ## 4. Backups
 
 ```sh
