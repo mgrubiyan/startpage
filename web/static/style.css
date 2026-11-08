@@ -133,7 +133,7 @@ button, input, select { font: inherit; color: inherit; }
   cursor: pointer;
   font-size: 13px;
 }
-.ghost:hover, .ghost[aria-pressed="true"] { color: var(--text); background: var(--surface); }
+.ghost[aria-pressed="true"] { color: var(--text); background: var(--surface); }
 
 .bookmarks {
   list-style: none;
@@ -157,8 +157,17 @@ button, input, select { font: inherit; color: inherit; }
   border: 1px solid var(--border);
   transition: transform .12s ease, border-color .12s ease;
 }
-.bookmarks a:hover { border-color: var(--accent); transform: translateY(-1px); }
 .bookmarks a:active { transform: scale(.97); }
+
+/* Every button answers a press. Hover only where there is a real pointer:
+   on a phone a tap leaves :hover stuck until the next tap elsewhere. */
+.ghost, .inline-form button, .settings button, .login-card button { transition: transform 160ms ease-out; }
+:is(.ghost, .inline-form button, .settings button, .login-card button):active { transform: scale(.97); }
+@media (hover: hover) and (pointer: fine) {
+  .ghost:hover { color: var(--text); background: var(--surface); }
+  .bookmarks a:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .art-caption[href]:hover { color: #fff; background: rgba(0, 0, 0, .5); }
+}
 .icon {
   width: 32px;
   height: 32px;
@@ -293,26 +302,29 @@ button, input, select { font: inherit; color: inherit; }
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  transform: scale(1.03);
-  transition: opacity .7s ease, transform 1.4s cubic-bezier(.2, .7, .2, 1);
+  transition: opacity 300ms cubic-bezier(.23, 1, .32, 1);
 }
+.backdrop img.shown { opacity: 1; }
+/* The painting a new tab restores appears at once: on a page opened all day,
+   a fade only makes every tab feel slower. Only a new painting fades in. */
+.backdrop.instant img { transition: none; }
 /* Darker at the top and bottom, where the clock and the services list sit. */
 .backdrop::after {
   content: "";
   position: absolute;
   inset: 0;
   opacity: 0;
-  transition: opacity .7s ease;
   background:
     radial-gradient(ellipse at 50% 35%, rgba(0,0,0,0) 0%, rgba(0,0,0,.25) 100%),
     linear-gradient(180deg, rgba(0,0,0,.42) 0%, rgba(0,0,0,.12) 38%, rgba(0,0,0,.12) 62%, rgba(0,0,0,.48) 100%);
 }
-.has-art .backdrop img { opacity: 1; transform: none; }
 .has-art .backdrop::after { opacity: 1; }
 
 /* Over a painting the page turns to dark glass, whatever the system theme:
    light text on a blurred, tinted surface reads on bright and dark works alike. */
 body.has-art {
+  /* Dark under the painting too, so the moments before it decodes don't flash light. */
+  background: #0e0e11;
   --surface: rgba(16, 16, 20, .5);
   --text: #f5f5f7;
   --muted: rgba(245, 245, 247, .78);
@@ -323,8 +335,9 @@ body.has-art {
 }
 .has-art :is(.chip, .search input, .suggestions, .bookmarks a, .services li, .demo-banner,
   .inline-form input, .settings input, .settings select, .login-card, .ghost:hover, .ghost[aria-pressed="true"]) {
-  -webkit-backdrop-filter: blur(18px) saturate(150%);
-  backdrop-filter: blur(18px) saturate(150%);
+  /* 12px reads the same as more and costs far less with dozens of tiles on a phone. */
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  backdrop-filter: blur(12px) saturate(150%);
 }
 .has-art :is(.time, .date, .section-head h2) { text-shadow: 0 1px 14px rgba(0, 0, 0, .5); }
 .has-art :is(.suggestions li:hover, .suggestions li[aria-selected="true"]) { background: rgba(255, 255, 255, .12); }
@@ -349,7 +362,6 @@ body.has-art {
   text-overflow: ellipsis;
   transition: color .15s ease, background-color .15s ease;
 }
-.art-caption[href]:hover { color: #fff; background: rgba(0, 0, 0, .5); }
 @media (min-width: 1320px) {
   .art-caption {
     position: fixed;
@@ -359,8 +371,4 @@ body.has-art {
     margin: 0;
     max-width: calc((100vw - 760px) / 2 - 32px);
   }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .backdrop img, .backdrop::after { transition: none; transform: none; }
 }
