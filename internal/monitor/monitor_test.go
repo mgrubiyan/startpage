@@ -20,6 +20,8 @@ type fakeStore struct {
 	services []store.Service
 	rounds   [][]store.Check
 	pruned   []time.Time
+	statuses []store.ServiceStatus // what the database remembers from before a restart
+	since    time.Time             // the window ServiceStatuses was last asked for
 	recorded chan struct{}
 }
 
@@ -46,6 +48,13 @@ func (f *fakeStore) PruneChecks(_ context.Context, before time.Time) (int64, err
 	defer f.mu.Unlock()
 	f.pruned = append(f.pruned, before)
 	return 0, nil
+}
+
+func (f *fakeStore) ServiceStatuses(_ context.Context, since time.Time) ([]store.ServiceStatus, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.since = since
+	return append([]store.ServiceStatus(nil), f.statuses...), nil
 }
 
 func (f *fakeStore) Rounds() [][]store.Check {

@@ -24,6 +24,7 @@ import (
 	"github.com/mgrubiyan/startpage/internal/rates"
 	"github.com/mgrubiyan/startpage/internal/store/postgres"
 	"github.com/mgrubiyan/startpage/internal/suggest"
+	"github.com/mgrubiyan/startpage/internal/telegram"
 	"github.com/mgrubiyan/startpage/internal/weather"
 	"github.com/mgrubiyan/startpage/web"
 )
@@ -78,7 +79,12 @@ func run() error {
 		}
 	}
 
-	mon := monitor.New(db, logger, monitor.Config{Interval: cfg.MonitorInterval})
+	var alerts monitor.Notifier // stays a nil interface when Telegram isn't configured
+	if cfg.TelegramToken != "" {
+		alerts = telegram.New(&http.Client{Timeout: 10 * time.Second}, cfg.TelegramToken, cfg.TelegramChatID)
+		logger.Info("monitor alerts go to Telegram")
+	}
+	mon := monitor.New(db, logger, monitor.Config{Interval: cfg.MonitorInterval, Notifier: alerts})
 	monitorCtx, stopMonitor := context.WithCancel(ctx)
 	monitorDone := make(chan struct{})
 	go func() {
