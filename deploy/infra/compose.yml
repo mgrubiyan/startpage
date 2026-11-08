@@ -17,6 +17,7 @@ services:
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
       HOME_DOMAIN: ${HOME_DOMAIN:?set HOME_DOMAIN in .env}
       DEMO_DOMAIN: ${DEMO_DOMAIN:?set DEMO_DOMAIN in .env}
+      APEX_DOMAIN: ${APEX_DOMAIN:?set APEX_DOMAIN in .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
