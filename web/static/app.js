@@ -449,32 +449,58 @@ $('search').addEventListener('submit', (e) => {
 // ---------- background ----------
 // Painting of the day. The server proxies the image, so the page still talks
 // only to its own origin. Any failure keeps the plain background.
-async function loadArt() {
+//
+// A new tab must open looking right, not plain and then repainted: the last
+// painting is remembered and shown at once (the browser has its image cached
+// for the day), and /api/art is then asked whether a new one is due.
+const ART_KEY = 'startpage.art';
+
+function showArt(art, { instant }) {
   const img = $('art-img');
+  img.parentElement.classList.toggle('instant', instant);
+  img.onload = () => img.classList.add('shown');
+  img.src = art.image;
+  const caption = $('art-caption');
+  const work = [art.title, art.date].filter(Boolean).join(', ');
+  caption.textContent = [art.artist, work].filter(Boolean).join(' — ');
+  const href = art.url && safeUrl(art.url);
+  if (href) caption.href = href; else caption.removeAttribute('href');
+  // Long titles are cut off in the corner; the tooltip has them in full.
+  caption.title = caption.textContent + '\nCleveland Museum of Art, Open Access (CC0)';
+  caption.hidden = false;
+  document.body.classList.add('has-art');
+}
+
+function restoreArt() {
+  let art = null;
+  try { art = JSON.parse(localStorage.getItem(ART_KEY)); } catch { /* no storage: load as usual */ }
+  if (art && typeof art.image === 'string' && art.image.startsWith('/api/art/image?v=')) {
+    showArt(art, { instant: true });
+  }
+}
+
+async function loadArt() {
   try {
     const art = await api('/api/art');
-    if (img.getAttribute('src') === art.image) return;
+    if ($('art-img').getAttribute('src') === art.image) return;
     // Decode off-screen first: a failed download must not replace a good painting.
     const next = new Image();
     next.src = art.image;
     await next.decode();
-    img.src = art.image;
-    const caption = $('art-caption');
-    const work = [art.title, art.date].filter(Boolean).join(', ');
-    caption.textContent = [art.artist, work].filter(Boolean).join(' — ');
-    const href = art.url && safeUrl(art.url);
-    if (href) caption.href = href; else caption.removeAttribute('href');
-    // Long titles are cut off in the corner; the tooltip has them in full.
-    caption.title = caption.textContent + '\nCleveland Museum of Art, Open Access (CC0)';
-    caption.hidden = false;
-    document.body.classList.add('has-art');
+    // Fade in only the very first painting; replacing one is a plain swap.
+    showArt(art, { instant: document.body.classList.contains('has-art') });
+    const { image, title, artist, date, url } = art;
+    try { localStorage.setItem(ART_KEY, JSON.stringify({ image, title, artist, date, url })); } catch { /* not remembered */ }
   } catch { /* plain background */ }
 }
 
 function clearArt() {
   document.body.classList.remove('has-art');
   $('art-caption').hidden = true;
-  $('art-img').removeAttribute('src');
+  const img = $('art-img');
+  img.classList.remove('shown');
+  img.removeAttribute('src');
+  try { localStorage.removeItem(ART_KEY); } catch { /* nothing stored */ }
 }
 
 // ---------- boot ----------
@@ -511,4 +537,5 @@ async function boot() {
 
 tick();
 setInterval(tick, 1000);
+restoreArt(); // before boot's API calls, so the first paint already has the painting
 boot();
