@@ -5,13 +5,16 @@
 A self-hosted browser start page with a Go backend: search with live suggestions,
 bookmarks, clock, weather, Central Bank of Russia exchange rates and an uptime
 monitor for your own services (Telegram bots, APIs, anything with an HTTP endpoint).
+The background is a public-domain painting of the day.
+
+**Live demo: [demo.mgrubiyan.ru](https://demo.mgrubiyan.ru)** (read-only, no login).
 
 The frontend is plain HTML/CSS/JS embedded into the binary. All data comes from
 the Go JSON API; the browser doesn't call third-party APIs. The one exception is
 bookmark icons, which load from Google's favicon service, so bookmark hostnames
 are visible to Google.
 
-![startpage in demo mode: clock, weather, CBR rates, search, bookmarks and the service monitor](docs/screenshot.png)
+![startpage in demo mode over the painting of the day: clock, weather, CBR rates, search, bookmarks and the service monitor](docs/screenshot.jpeg)
 
 ## Features
 
