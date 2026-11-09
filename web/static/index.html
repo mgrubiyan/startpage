@@ -81,6 +81,31 @@
       <span id="set-status" class="muted"></span>
     </form>
 
+    <div class="desk">
+      <section class="panel" aria-labelledby="tasks-h">
+        <div class="section-head">
+          <h2 id="tasks-h">Задачи</h2>
+          <div class="actions">
+            <button type="button" id="tasks-clear" class="ghost edit-only" hidden>Убрать выполненные</button>
+          </div>
+        </div>
+        <form id="add-task" class="task-form edit-only" autocomplete="off">
+          <input id="task-title" type="text" placeholder="Новая задача — Enter" maxlength="200" required
+                 aria-label="Новая задача">
+        </form>
+        <ul id="tasks" class="tasks"></ul>
+        <span id="tasks-error" class="error" role="alert"></span>
+      </section>
+      <section class="panel" aria-labelledby="note-h">
+        <div class="section-head">
+          <h2 id="note-h">Заметки</h2>
+          <span id="note-status" class="note-status" aria-live="polite"></span>
+        </div>
+        <textarea id="note" class="note" maxlength="10000" aria-labelledby="note-h"
+                  placeholder="Что угодно: сохранится само"></textarea>
+      </section>
+    </div>
+
     <section class="section-head services-head">
       <h2>Сервисы</h2>
       <div class="actions">
