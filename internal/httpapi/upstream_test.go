@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mgrubiyan/startpage/internal/rates"
 	"github.com/mgrubiyan/startpage/internal/weather"
@@ -23,6 +25,64 @@ func TestWeatherUsesCityFromSettings(t *testing.T) {
 	}
 	if got.Location != "Москва" || got.Temperature != 1.5 || got.FeelsLike != -3 || got.Icon != "🌨️" || !got.Stale || !got.FetchedAt.Equal(testNow) {
 		t.Fatalf("weather = %+v", got)
+	}
+}
+
+func TestWeatherForecast(t *testing.T) {
+	env := newTestEnv(t)
+	msk := time.FixedZone("", 3*60*60)
+	pct := 40
+	env.weather.value = weather.Report{
+		Location:  "Москва",
+		UTCOffset: 3 * time.Hour,
+		Days: []weather.Day{
+			// Over in Moscow by testNow (noon UTC on the 6th): a stale report still has it.
+			{Date: "2026-11-05", MinC: 1, MaxC: 2},
+			{
+				Date: "2026-11-06", MinC: -2.5, MaxC: 1, Description: "снег", Icon: "🌨️", PrecipitationPct: &pct,
+				Sunrise: time.Date(2026, 11, 6, 7, 48, 0, 0, msk), Sunset: time.Date(2026, 11, 6, 16, 41, 0, 0, msk),
+			},
+			{Date: "2026-11-07", MinC: -4, MaxC: -1, Description: "ясно", Icon: "☀️"}, // no sun times
+		},
+	}
+
+	rec := env.do(t, "GET", "/api/weather", "")
+	got := decode[weatherDTO](t, rec)
+	want := []forecastDayDTO{
+		{Date: "2026-11-06", Min: -2.5, Max: 1, Description: "снег", Icon: "🌨️", Precipitation: &pct, Sunrise: "07:48", Sunset: "16:41", DaylightMinutes: 533},
+		{Date: "2026-11-07", Min: -4, Max: -1, Description: "ясно", Icon: "☀️"},
+	}
+	if !reflect.DeepEqual(got.Days, want) {
+		t.Fatalf("days = %+v\nwant %+v", got.Days, want)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `"precipitation":null`) || strings.Count(body, `"sunrise"`) != 1 {
+		t.Fatalf("an unknown chance must be null and missing sun times left out: %s", body)
+	}
+}
+
+// The day changes at the city's midnight, not at the server's or at UTC's.
+func TestWeatherForecastUsesCityCalendar(t *testing.T) {
+	env := newTestEnv(t)
+	days := []weather.Day{{Date: "2026-11-06"}, {Date: "2026-11-07"}}
+	for _, tt := range []struct {
+		offset time.Duration
+		first  string
+	}{
+		{-11 * time.Hour, "2026-11-06"}, // 01:00 on the 6th
+		{13 * time.Hour, "2026-11-07"},  // 01:00 on the 7th already
+	} {
+		env.weather.value = weather.Report{UTCOffset: tt.offset, Days: days}
+		got := decode[weatherDTO](t, env.do(t, "GET", "/api/weather", ""))
+		if len(got.Days) == 0 || got.Days[0].Date != tt.first {
+			t.Errorf("offset %v: days = %+v, want them to start on %s", tt.offset, got.Days, tt.first)
+		}
+	}
+}
+
+func TestWeatherWithoutForecastSendsEmptyList(t *testing.T) {
+	env := newTestEnv(t)
+	if body := env.do(t, "GET", "/api/weather", "").Body.String(); !strings.Contains(body, `"days":[]`) {
+		t.Fatalf("days must be [], not null: %s", body)
 	}
 }
 
