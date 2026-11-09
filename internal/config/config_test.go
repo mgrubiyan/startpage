@@ -88,6 +88,47 @@ func TestLoadErrors(t *testing.T) {
 	}
 }
 
+func TestTelegram(t *testing.T) {
+	const token = "123456:AAH-xyzzy_part"
+	base := func(extra map[string]string) map[string]string {
+		m := map[string]string{"DATABASE_URL": "postgres://db", "STARTPAGE_PASSWORD": "correct-horse"}
+		for k, v := range extra {
+			m[k] = v
+		}
+		return m
+	}
+
+	cfg, err := Load(env(base(nil)))
+	if err != nil || cfg.TelegramToken != "" || cfg.TelegramChatID != "" {
+		t.Fatalf("unset: cfg %+v, err %v; alerts must be off by default", cfg, err)
+	}
+	cfg, err = Load(env(base(map[string]string{"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "-1001234"})))
+	if err != nil || cfg.TelegramToken != token || cfg.TelegramChatID != "-1001234" {
+		t.Fatalf("both set: cfg %+v, err %v", cfg, err)
+	}
+
+	for name, tc := range map[string]struct {
+		env     map[string]string
+		wantErr string
+	}{
+		"token only":   {map[string]string{"TELEGRAM_BOT_TOKEN": token}, "set together"},
+		"chat id only": {map[string]string{"TELEGRAM_CHAT_ID": "42"}, "set together"},
+		"bad token":    {map[string]string{"TELEGRAM_BOT_TOKEN": "bot123:abc/def", "TELEGRAM_CHAT_ID": "42"}, "@BotFather"},
+		"demo": {map[string]string{"STARTPAGE_PASSWORD": "", "STARTPAGE_DEMO": "true",
+			"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "42"}, "not the demo"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(env(base(tc.env)))
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v, want containing %q", err, tc.wantErr)
+			}
+			if strings.Contains(err.Error(), "xyzzy") || strings.Contains(err.Error(), "abc/def") {
+				t.Errorf("error echoes the token: %v", err)
+			}
+		})
+	}
+}
+
 func TestDemoNeedsNoPassword(t *testing.T) {
 	cfg, err := Load(env(map[string]string{
 		"DATABASE_URL":   "postgres://db/startpage",

@@ -84,6 +84,30 @@ docker compose up -d startpage
 At startup the app sees that the password changed and deletes every session, so all devices
 (and anyone who had the old password) are logged out.
 
+### Telegram alerts
+
+Optional: the personal instance can message you when a monitored service goes down or comes back.
+
+1. In Telegram, message [@BotFather](https://t.me/BotFather), send `/newbot` and copy the token.
+2. Open the new bot and press **Start**, so it is allowed to message you.
+3. Find your chat id. Pass the token through `read`, so it doesn't land in the shell history:
+   ```sh
+   read -rs TOKEN
+   curl -s "https://api.telegram.org/bot$TOKEN/getUpdates" | grep -o '"chat":{"id":-\?[0-9]*'
+   ```
+4. Add both to `/opt/startpage/.env` and restart the personal instance:
+   ```sh
+   TELEGRAM_BOT_TOKEN=123456:AA...
+   TELEGRAM_CHAT_ID=123456789
+   ```
+   ```sh
+   docker compose up -d startpage
+   docker compose logs startpage | grep -i telegram   # "monitor alerts go to Telegram"
+   ```
+
+To test it, add a service with a URL that doesn't answer. The alert arrives after two probe
+intervals. A group chat works too: add the bot to the group and use the group's (negative) id.
+
 ## 4. Backups
 
 ```sh
