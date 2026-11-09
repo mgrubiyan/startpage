@@ -97,6 +97,7 @@ jobs:
           KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           TARGET: ${{ vars.DEPLOY_USER }}@${{ vars.DEPLOY_HOST }}
           TAG: ${{ github.sha }}
+          IMAGE: ghcr.io/${{ github.repository }}
         run: |
           install -m 700 -d ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
@@ -104,4 +105,7 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           # $TAG expands here on purpose: the server runs the image of this commit.
           # shellcheck disable=SC2029
-          ssh "$TARGET" "cd /opt/startpage && export STARTPAGE_TAG=$TAG && docker compose pull && docker compose up -d && docker image prune -f"
+          # Then the server's local :latest is moved to that image, so a manual
+          # `docker compose up -d` without STARTPAGE_TAG runs it too instead of the
+          # :latest pulled at first setup.
+          ssh "$TARGET" "cd /opt/startpage && export STARTPAGE_TAG=$TAG && docker compose pull && docker compose up -d && docker tag $IMAGE:$TAG $IMAGE:latest && docker image prune -f"
