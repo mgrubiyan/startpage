@@ -124,7 +124,9 @@ to check that a dump restores.
 
 The `deploy` job in `.github/workflows/ci.yml` is off until `DEPLOY_HOST` is set. After that,
 each green push to `main` runs `docker compose pull && up -d` on the server, pinned to the
-commit's image tag.
+commit's image tag. It then points the server's local `:latest` at that image, so a manual
+`docker compose up -d` (after editing `.env`, say) keeps the deployed version instead of
+falling back to the `:latest` pulled at first setup.
 
 ```sh
 # on the server: a deploy user that can run docker, with a key used only by CI
