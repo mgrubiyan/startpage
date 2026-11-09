@@ -143,12 +143,53 @@ async function loadWeather() {
     $('weather-city').textContent = w.location;
     $('weather-value').textContent = `${w.icon} ${fmtTemp(w.temperature)} · ${Math.round(w.windMs)} м/с`;
     $('weather').title = `${w.description}, ощущается как ${fmtTemp(w.feelsLike)}` + (w.stale ? ' · данные устарели' : '');
+    renderForecast(w.days || [], w.stale);
   } catch (e) {
     if (ignorable(e)) return;
     $('weather-city').textContent = state.settings.city || 'Погода';
     $('weather-value').textContent = '—';
     $('weather').title = 'Погода недоступна: ' + e.message;
+    renderForecast([], false, 'Прогноз недоступен');
   }
+}
+
+// Days arrive as "YYYY-MM-DD" in the city's calendar. new Date("2026-11-10")
+// would be UTC midnight, i.e. the 9th west of Greenwich, so build it from parts.
+function dayLabel(iso, i) {
+  if (i === 0) return 'Сегодня'; // the server already dropped days over in the city
+  if (i === 1) return 'Завтра';
+  const [y, m, d] = iso.split('-').map(Number);
+  const s = new Date(y, m - 1, d).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric' });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+const fmtDaylight = (min) => `${Math.floor(min / 60)} ч ${min % 60} мин`;
+
+function renderForecast(days, stale, emptyText = 'Нет данных') {
+  const ol = $('forecast');
+  ol.textContent = '';
+  ol.classList.toggle('stale', stale);
+  const today = days[0];
+  const sun = $('sun');
+  sun.textContent = today && today.sunrise
+    ? `↑ ${today.sunrise}  ↓ ${today.sunset} · ${fmtDaylight(today.daylightMinutes)}`
+    : '';
+  sun.title = sun.textContent ? 'Восход, закат и долгота дня' : '';
+  if (!days.length) { ol.append(el('li', 'empty', emptyText)); return; }
+  days.forEach((d, i) => {
+    const li = el('li');
+    // Below 10% it's noise; the empty slot keeps the cards the same height.
+    const p = d.precipitation;
+    li.append(
+      el('span', 'day', dayLabel(d.date, i)),
+      el('span', 'icon-lg', d.icon),
+      el('span', 'temps', `${fmtTemp(d.max)} / ${fmtTemp(d.min)}`),
+      el('span', 'precip', p != null && p >= 10 ? `💧 ${p}%` : ''),
+    );
+    const sunLine = d.sunrise ? `\nвосход ${d.sunrise}, закат ${d.sunset}` : '';
+    li.title = (d.description || '') + (p != null ? `, осадки ${p}%` : '') + sunLine + (stale ? '\nданные устарели' : '');
+    ol.append(li);
+  });
 }
 
 // ---------- rates ----------

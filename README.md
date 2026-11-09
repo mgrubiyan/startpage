@@ -20,7 +20,10 @@ are visible to Google.
 
 - **Search**: default engine plus prefixes (`g`, `y`, `d`, `gh`, `yt`, `w`), address detection,
   suggestions proxied from Google (DuckDuckGo fallback) with keyboard navigation.
-- **Weather and rates**: Open-Meteo and the CBR daily feed, cached server-side.
+- **Weather and rates**: current weather, a five-day forecast with sunrise,
+  sunset and day length (Open-Meteo), and the CBR daily feed, cached server-side.
+  Forecast days and sun times are in the city's own time zone, not the server's
+  or the browser's.
 - **Painting of the day**: a public-domain (CC0) work from the Cleveland Museum of Art as the
   background, under a dark glass theme, with a caption linking to the museum's page.
 - **Bookmarks and settings**: stored in Postgres.
@@ -201,7 +204,7 @@ are open and writes are refused). JSON in, JSON out.
 | `DELETE` | `/api/tasks/completed` | removes every done task: `{"deleted": n}` |
 | `GET` / `POST` | `/api/services` | list with last check and 24h uptime / add `{"name", "url"}` |
 | `DELETE` | `/api/services/{id}` | |
-| `GET` | `/api/weather` | current weather for the configured city |
+| `GET` | `/api/weather` | current weather and a five-day forecast (`days`, with sunrise/sunset) for the configured city |
 | `GET` | `/api/rates` | USD and EUR from the CBR, with previous values |
 | `GET` | `/api/suggest?q=` | search suggestions |
 | `GET` | `/api/art` | today's painting: `{"title", "artist", "date", "url", "image"}` |
