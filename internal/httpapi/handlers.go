@@ -79,6 +79,8 @@ type api struct {
 	rates   RatesSource
 	suggest SuggestSource
 	art     ArtSource
+	crypto  MarketSource
+	stocks  MarketSource
 	auth    Authenticator
 	limiter RateLimiter
 	logger  *slog.Logger
