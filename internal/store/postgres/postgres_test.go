@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -302,5 +303,102 @@ func TestServiceStatusesAndRetention(t *testing.T) {
 	}
 	if left != 0 {
 		t.Fatalf("checks not cascaded on delete: %d left", left)
+	}
+}
+
+func TestNoteRoundTrip(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	n, err := s.Note(ctx)
+	if err != nil || n.Text != "" {
+		t.Fatalf("fresh note = %+v, %v", n, err)
+	}
+	saved, err := s.SaveNote(ctx, "строка\n\tвторая")
+	if err != nil || saved.Text != "строка\n\tвторая" || !saved.UpdatedAt.After(n.UpdatedAt) {
+		t.Fatalf("SaveNote = %+v, %v (was %v)", saved, err, n.UpdatedAt)
+	}
+	if got, _ := s.Note(ctx); got != saved {
+		t.Fatalf("Note = %+v, want %+v", got, saved)
+	}
+	if _, err := s.SaveNote(ctx, strings.Repeat("я", 10001)); err == nil {
+		t.Fatal("an over-long note must violate the CHECK constraint")
+	}
+}
+
+func TestTasks(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	var ids []int64
+	for _, title := range []string{"a", "b", "c", "d"} {
+		task, err := s.AddTask(ctx, title)
+		if err != nil || task.Title != title || task.Done {
+			t.Fatalf("AddTask(%q) = %+v, %v", title, task, err)
+		}
+		ids = append(ids, task.ID)
+	}
+	// Finish c, then a: open ones stay in creation order, finished ones go
+	// below, the most recently finished first.
+	for _, id := range []int64{ids[2], ids[0]} {
+		if task, err := s.SetTaskDone(ctx, id, true); err != nil || !task.Done {
+			t.Fatalf("SetTaskDone(%d) = %+v, %v", id, task, err)
+		}
+	}
+	order := func() string {
+		t.Helper()
+		list, err := s.Tasks(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var b strings.Builder
+		for _, task := range list {
+			b.WriteString(task.Title)
+			if task.Done {
+				b.WriteString("✓")
+			}
+		}
+		return b.String()
+	}
+	if got := order(); got != "bda✓c✓" {
+		t.Fatalf("order = %s, want bda✓c✓", got)
+	}
+	// Marking a done task done again keeps its place.
+	if _, err := s.SetTaskDone(ctx, ids[2], true); err != nil {
+		t.Fatal(err)
+	}
+	if got := order(); got != "bda✓c✓" {
+		t.Fatalf("repeated done reordered: %s", got)
+	}
+	if task, err := s.SetTaskDone(ctx, ids[0], false); err != nil || task.Done || task.Title != "a" {
+		t.Fatalf("reopen = %+v, %v", task, err)
+	}
+	if got := order(); got != "abdc✓" {
+		t.Fatalf("after reopen = %s, want abdc✓", got)
+	}
+
+	if _, err := s.SetTaskDone(ctx, 1<<40, true); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing task err = %v, want ErrNotFound", err)
+	}
+	if err := s.DeleteTask(ctx, ids[1]); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteTask(ctx, ids[1]); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("second delete err = %v, want ErrNotFound", err)
+	}
+	if n, err := s.DeleteDoneTasks(ctx); err != nil || n != 1 {
+		t.Fatalf("DeleteDoneTasks = %d, %v", n, err)
+	}
+	if got := order(); got != "ad" {
+		t.Fatalf("after clearing = %s, want ad", got)
+	}
+
+	if _, err := s.AddTask(ctx, ""); err == nil {
+		t.Fatal("an empty title must violate the CHECK constraint")
+	}
+	if _, err := s.AddTask(ctx, strings.Repeat("я", 201)); err == nil {
+		t.Fatal("an over-long title must violate the CHECK constraint")
 	}
 }

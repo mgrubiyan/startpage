@@ -24,6 +24,9 @@ func TestDemoModeIsReadOnly(t *testing.T) {
 	env := demoEnv(t)
 	// One existing service, so a leaked DELETE /api/services/1 would have something to remove.
 	env.store.statuses = []store.ServiceStatus{{Service: store.Service{ID: 1, Name: "bot", URL: "https://bot.example"}}}
+	// And one task and a note, so leaked task writes or a note save would show.
+	env.store.tasks = []store.Task{{ID: 1, Title: "demo", Done: true}}
+	env.store.note = store.Note{Text: "demo note"}
 	before := env.store.settings
 	var reads, writes int
 	for _, rt := range (&api{}).routes() {
@@ -42,7 +45,7 @@ func TestDemoModeIsReadOnly(t *testing.T) {
 				return
 			}
 			// A body every write handler would accept, so a 403 can only come from the guard.
-			body := `{"password":"correct-horse","title":"x","url":"https://evil.example","name":"x","searchEngine":"y","city":"Москва"}`
+			body := `{"password":"correct-horse","title":"x","url":"https://evil.example","name":"x","searchEngine":"y","city":"Москва","text":"x","done":false}`
 			rec := env.doAnon(t, method, path, body)
 			if rec.Code != http.StatusForbidden {
 				t.Fatalf("write = %d, want 403", rec.Code)
@@ -56,7 +59,8 @@ func TestDemoModeIsReadOnly(t *testing.T) {
 		t.Fatalf("route table changed shape: %d reads, %d writes", reads, writes)
 	}
 	if len(env.store.bookmarks) != 1 || env.store.settings != before ||
-		len(env.store.statuses) != 1 || env.servicesChange != 0 {
+		len(env.store.statuses) != 1 || env.servicesChange != 0 ||
+		len(env.store.tasks) != 1 || !env.store.tasks[0].Done || env.store.note.Text != "demo note" {
 		t.Fatalf("demo writes changed state: %d bookmarks, settings %+v, %d services, %d service changes",
 			len(env.store.bookmarks), env.store.settings, len(env.store.statuses), env.servicesChange)
 	}

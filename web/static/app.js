@@ -23,8 +23,9 @@ const state = { settings: { searchEngine: 'g', city: '' } };
 // ---------- API ----------
 class AuthError extends Error {}
 
-async function api(path, { method = 'GET', body, signal } = {}) {
-  const init = { method, signal, credentials: 'same-origin', headers: {} };
+async function api(path, { method = 'GET', body, signal, keepalive = false } = {}) {
+  // keepalive lets a save started as the tab goes away outlive the page.
+  const init = { method, signal, keepalive, credentials: 'same-origin', headers: {} };
   if (body !== undefined) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
@@ -446,6 +447,167 @@ $('search').addEventListener('submit', (e) => {
   go();
 });
 
+// ---------- tasks ----------
+const isDemo = () => document.body.classList.contains('demo');
+
+function taskItem(t) {
+  const li = el('li', t.done ? 'done' : '');
+  const label = el('label');
+  const box = el('input');
+  box.type = 'checkbox';
+  box.checked = t.done;
+  box.disabled = isDemo();
+  box.addEventListener('change', async () => {
+    box.disabled = true;
+    try {
+      await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { done: box.checked } });
+      $('tasks-error').textContent = '';
+      loadTasks();
+    } catch (e) {
+      box.checked = !box.checked;
+      box.disabled = false;
+      if (!ignorable(e)) $('tasks-error').textContent = e.message;
+    }
+  });
+  label.append(box, el('span', 'title', t.title));
+  const rm = el('button', 'del edit-only', '×');
+  rm.type = 'button';
+  rm.title = 'Удалить';
+  rm.setAttribute('aria-label', 'Удалить задачу: ' + t.title);
+  rm.addEventListener('click', async () => {
+    try {
+      await api(`/api/tasks/${t.id}`, { method: 'DELETE' });
+      loadTasks();
+    } catch (e) {
+      if (!ignorable(e)) $('tasks-error').textContent = e.message;
+    }
+  });
+  li.append(label, rm);
+  return li;
+}
+
+async function loadTasks() {
+  try {
+    const list = await api('/api/tasks');
+    const ul = $('tasks');
+    ul.textContent = '';
+    if (!list.length) ul.append(el('li', 'empty', 'Задач нет'));
+    list.forEach((t) => ul.append(taskItem(t)));
+    const done = list.filter((t) => t.done).length;
+    $('tasks-clear').hidden = done === 0;
+    $('tasks-clear').textContent = `Убрать выполненные (${done})`;
+  } catch (e) {
+    if (!ignorable(e)) $('tasks-error').textContent = 'Задачи не загрузились: ' + e.message;
+  }
+}
+
+$('add-task').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('task-title');
+  const title = input.value.trim();
+  if (!title) return;
+  input.disabled = true;
+  try {
+    await api('/api/tasks', { method: 'POST', body: { title } });
+    $('tasks-error').textContent = '';
+    input.value = '';
+    loadTasks();
+  } catch (ex) {
+    if (!ignorable(ex)) $('tasks-error').textContent = ex.message;
+  } finally {
+    input.disabled = false;
+    input.focus();
+  }
+});
+
+$('tasks-clear').addEventListener('click', async () => {
+  try {
+    await api('/api/tasks/completed', { method: 'DELETE' });
+    loadTasks();
+  } catch (e) {
+    if (!ignorable(e)) $('tasks-error').textContent = e.message;
+  }
+});
+
+// ---------- note ----------
+// Saves itself as you type. Every new tab is a start page, so several copies
+// are often open: the note is re-read when a tab comes back, and the last save
+// wins. Two rules keep typed text safe:
+// - one save in flight at a time, so an older save can't land after a newer one;
+// - text from the server never replaces the textarea while there are edits it
+//   hasn't seen, which would also move the cursor.
+const noteEl = $('note');
+const note = { edits: 0, savedEdits: 0, inFlight: false, again: false, timer: 0 };
+
+function fmtSaved(iso) {
+  const d = new Date(iso);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay
+    ? d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+}
+
+const noteStatus = (text) => { $('note-status').textContent = text; };
+const noteDirty = () => note.edits !== note.savedEdits || note.inFlight;
+
+async function loadNote() {
+  const before = note.edits;
+  try {
+    const n = await api('/api/note');
+    if (note.edits !== before || noteDirty()) return; // typed meanwhile: keep the local text
+    if (noteEl.value !== n.text) noteEl.value = n.text;
+    noteStatus(n.text ? 'сохранено ' + fmtSaved(n.updatedAt) : '');
+  } catch (e) {
+    if (!ignorable(e)) noteStatus('не загрузилась: ' + e.message);
+  }
+}
+
+async function saveNote({ keepalive = false } = {}) {
+  clearTimeout(note.timer);
+  if (note.inFlight) { note.again = true; return; }
+  if (note.edits === note.savedEdits) return;
+  const edits = note.edits;
+  note.inFlight = true;
+  noteStatus('сохраняю…');
+  let ok = false;
+  try {
+    const saved = await api('/api/note', { method: 'PUT', body: { text: noteEl.value }, keepalive });
+    note.savedEdits = edits;
+    ok = true;
+    if (note.edits === edits) noteStatus('сохранено ' + fmtSaved(saved.updatedAt));
+  } catch (e) {
+    if (!ignorable(e)) noteStatus('не сохранилось: ' + e.message);
+    // A network or server error may pass; a rejected text won't, so don't loop on it.
+    if (!(e instanceof AuthError) && !(e.status >= 400 && e.status < 500)) {
+      note.timer = setTimeout(saveNote, 5000);
+    }
+  } finally {
+    note.inFlight = false;
+  }
+  const again = note.again;
+  note.again = false;
+  if (ok && (again || note.edits !== note.savedEdits)) saveNote();
+}
+
+noteEl.addEventListener('input', () => {
+  note.edits++;
+  noteStatus('');
+  clearTimeout(note.timer);
+  note.timer = setTimeout(saveNote, 700);
+});
+noteEl.addEventListener('blur', () => saveNote());
+
+document.addEventListener('visibilitychange', () => {
+  if ($('app').hidden) return;
+  if (document.visibilityState === 'hidden') {
+    saveNote({ keepalive: true });
+  } else {
+    // Another tab may have changed both while this one was in the background.
+    loadNote();
+    loadTasks();
+  }
+});
+
 // ---------- background ----------
 // Painting of the day. The server proxies the image, so the page still talks
 // only to its own origin. Any failure keeps the plain background.
@@ -510,6 +672,7 @@ async function loadMeta() {
     const meta = await api('/api/meta');
     document.body.classList.toggle('demo', meta.demo);
     $('demo-banner').hidden = !meta.demo;
+    noteEl.readOnly = meta.demo;
   } catch { /* unknown mode: show the normal UI; a demo server still refuses writes */ }
 }
 
@@ -526,6 +689,8 @@ async function boot() {
   loadWeather();
   loadRates();
   loadBookmarks();
+  loadTasks();
+  loadNote();
   loadServices();
   loadArt();
   stopTimers();
