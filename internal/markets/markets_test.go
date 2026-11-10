@@ -62,8 +62,8 @@ func TestBinanceErrors(t *testing.T) {
 		code       int
 		want       string
 	}{
-		// One unknown symbol fails the whole request on Binance.
-		{"invalid symbol", `{"code":-1121,"msg":"Invalid symbol."}`, 400, "unexpected status 400"},
+		// Every symbol unknown: asked one by one, none is quoted.
+		{"invalid symbols", `{"code":-1121,"msg":"Invalid symbol."}`, 400, errNoQuotes.Error()},
 		{"geo-blocked", `{"code":0,"msg":"restricted location"}`, 451, "unexpected status 451"},
 		{"price not a number", `[{"symbol":"BTCUSDT","openPrice":"1","lastPrice":"n/a"}]`, 200, `lastPrice "n/a"`},
 		{"zero price", `[{"symbol":"BTCUSDT","openPrice":"0","lastPrice":"5"}]`, 200, `openPrice "0"`},
@@ -80,6 +80,71 @@ func TestBinanceErrors(t *testing.T) {
 				t.Fatalf("err = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+// Binance rejects a whole list for one unknown symbol; the board then asks
+// each coin on its own and lists the unknown one as missing.
+func TestBinanceUnknownSymbol(t *testing.T) {
+	var lists, singles atomic.Int32
+	srv := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch {
+		case q.Get("symbols") != "":
+			lists.Add(1)
+			w.WriteHeader(400)
+			_, _ = w.Write([]byte(`{"code":-1121,"msg":"Invalid symbol."}`))
+		case q.Get("symbol") == "BTCUSDT":
+			singles.Add(1)
+			_, _ = w.Write([]byte(`{"symbol":"BTCUSDT","openPrice":"100","lastPrice":"110","closeTime":1794253159001}`))
+		default:
+			singles.Add(1)
+			w.WriteHeader(400)
+			_, _ = w.Write([]byte(`{"code":-1121,"msg":"Invalid symbol."}`))
+		}
+	})
+	b := NewBinance(srv.Client(), Coins([]string{"BTC", "BTCC"}))
+	b.url = srv.URL
+
+	got, err := b.Board(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lists.Load() != 1 || singles.Load() != 2 {
+		t.Fatalf("requests: %d lists, %d singles", lists.Load(), singles.Load())
+	}
+	if len(got.Quotes) != 1 || got.Quotes[0].Symbol != "BTC" || !near(got.Quotes[0].ChangePct, 10) {
+		t.Fatalf("quotes = %+v", got.Quotes)
+	}
+	if len(got.Missing) != 1 || got.Missing[0] != "BTCC" {
+		t.Fatalf("missing = %v", got.Missing)
+	}
+}
+
+// Any other failure of a single coin fails the board, as the list request would.
+func TestBinanceOneCoinFails(t *testing.T) {
+	srv := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("symbols") != "" {
+			w.WriteHeader(400)
+			return
+		}
+		w.WriteHeader(503)
+	})
+	b := NewBinance(srv.Client(), testCoins)
+	b.url = srv.URL
+	if _, err := b.Board(context.Background()); err == nil || !strings.Contains(err.Error(), "unexpected status 503") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCoinsAndShares(t *testing.T) {
+	c := Coins([]string{"BTC", "PEPE"})
+	if c[0] != (Coin{"BTC", "Bitcoin"}) || c[1] != (Coin{"PEPE", "PEPE"}) {
+		t.Fatalf("coins = %+v", c)
+	}
+	s := Shares([]string{"SBER", "AQUA"})
+	if s[0] != (Security{"SBER", "Сбербанк"}) || s[1] != (Security{"AQUA", ""}) {
+		t.Fatalf("shares = %+v", s)
 	}
 }
 
@@ -113,6 +178,9 @@ func TestBybit(t *testing.T) {
 	got, err := b.Board(context.Background())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(got.Missing) != 1 || got.Missing[0] != "TON" {
+		t.Fatalf("missing = %v, want the coin Bybit doesn't list", got.Missing)
 	}
 	if got.Source != "Bybit" || len(got.Quotes) != 2 || got.Quotes[0].Symbol != "BTC" || got.Quotes[1].Symbol != "ETH" {
 		t.Fatalf("board = %+v", got)
@@ -213,7 +281,8 @@ func moexServer(t *testing.T, index, shares string) *MOEX {
 		}
 		_, _ = w.Write([]byte(body))
 	})
-	m := NewMOEX(srv.Client(), DefaultIndex, []Security{{"SBER", "Сбербанк"}, {"GAZP", "Газпром"}, {"NOPE", "Нет такой"}})
+	// GAZP without a name of ours: it takes the exchange's SHORTNAME.
+	m := NewMOEX(srv.Client(), DefaultIndex, []Security{{"SBER", "Сбербанк"}, {"GAZP", ""}, {"NOPE", "Нет такой"}})
 	m.base = srv.URL
 	return m
 }
@@ -225,7 +294,7 @@ func TestMOEX(t *testing.T) {
 	// Columns in an order other than asked for, GAZP without trades yet,
 	// and NOPE silently missing, as ISS does with an unknown code.
 	shares := `{
-		"securities":{"columns":["PREVPRICE","SECID"],"data":[[293.99,"SBER"],[114.12,"GAZP"]]},
+		"securities":{"columns":["PREVPRICE","SECID","SHORTNAME"],"data":[[293.99,"SBER","Сбербанк"],[114.12,"GAZP","ГАЗПРОМ ао"]]},
 		"marketdata":{"columns":["SYSTIME","SECID","LAST","LASTTOPREVPRICE","UPDATETIME"],
 			"data":[["2026-11-10 00:05:00","SBER",295.42,0.49,"23:49:50"],["2026-11-10 00:05:00","GAZP",null,null,null]]}}`
 	got, err := moexServer(t, moexIndex, shares).Board(context.Background())
@@ -245,8 +314,27 @@ func TestMOEX(t *testing.T) {
 		!sber.At.Equal(time.Date(2026, 11, 9, 20, 49, 50, 0, time.UTC)) {
 		t.Fatalf("sber = %+v (at %v)", sber, sber.At.In(moscow))
 	}
-	if gazp.Price != 114.12 || gazp.ChangePct != 0 || !gazp.At.IsZero() {
-		t.Fatalf("gazp without trades = %+v, want the previous close", gazp)
+	if gazp.Price != 114.12 || gazp.ChangePct != 0 || !gazp.At.IsZero() || gazp.Name != "ГАЗПРОМ ао" {
+		t.Fatalf("gazp without trades = %+v, want the previous close under the exchange's name", gazp)
+	}
+	if len(got.Missing) != 1 || got.Missing[0] != "NOPE" {
+		t.Fatalf("missing = %v", got.Missing)
+	}
+}
+
+// With no shares listed the board is the index alone, and ISS isn't asked for shares.
+func TestMOEXIndexOnly(t *testing.T) {
+	srv := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index/boards/SNDX/securities.json" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(moexIndex))
+	})
+	m := NewMOEX(srv.Client(), DefaultIndex, nil)
+	m.base = srv.URL
+	got, err := m.Board(context.Background())
+	if err != nil || len(got.Quotes) != 1 || got.Quotes[0].Symbol != "IMOEX" || len(got.Missing) != 0 {
+		t.Fatalf("board = %+v, %v", got, err)
 	}
 }
 

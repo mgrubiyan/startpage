@@ -77,6 +77,15 @@
       <label>Город для погоды
         <input id="set-city" type="text" maxlength="60" required>
       </label>
+      <!-- Quotes are off in the demo, so their tickers are too. -->
+      <label class="edit-only" id="set-crypto-label">Криптовалюты, до 8
+        <input id="set-crypto" type="text" maxlength="100" placeholder="BTC ETH SOL TON"
+               autocomplete="off" autocapitalize="characters" spellcheck="false">
+      </label>
+      <label class="edit-only" id="set-shares-label">Акции Мосбиржи, до 8
+        <input id="set-shares" type="text" maxlength="120" placeholder="SBER GAZP LKOH YDEX"
+               autocomplete="off" autocapitalize="characters" spellcheck="false">
+      </label>
       <button type="submit">Сохранить</button>
       <span id="set-status" class="muted"></span>
     </form>
