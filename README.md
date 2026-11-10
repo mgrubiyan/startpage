@@ -209,7 +209,7 @@ are open and writes are refused). JSON in, JSON out.
 | `PATCH` | `/api/tasks/{id}` | `{"done": true}` or `false` |
 | `DELETE` | `/api/tasks/{id}` | |
 | `DELETE` | `/api/tasks/completed` | removes every done task: `{"deleted": n}` |
-| `GET` / `POST` | `/api/services` | list with last check and 24h uptime / add `{"name", "url"}` |
+| `GET` / `POST` | `/api/services` | list with last check, 24h uptime and `history` (24 hourly slots: checks, passed, average latency) / add `{"name", "url"}` |
 | `DELETE` | `/api/services/{id}` | |
 | `GET` | `/api/weather` | current weather and a five-day forecast (`days`, with sunrise/sunset) for the configured city |
 | `GET` | `/api/rates` | USD and EUR from the CBR, with previous values |

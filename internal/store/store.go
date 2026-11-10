@@ -61,6 +61,16 @@ type ServiceStatus struct {
 	OKChecks    int
 }
 
+// CheckBucket summarises a service's checks over one time slot.
+type CheckBucket struct {
+	Start time.Time
+	Total int
+	OK    int
+	// AvgLatency is over successful checks only: a timeout's latency is the
+	// timeout, not how fast the service answers. Zero when none succeeded.
+	AvgLatency time.Duration
+}
+
 // Uptime returns the share of successful checks in percent, or false if there were none.
 func (s ServiceStatus) Uptime() (float64, bool) {
 	if s.TotalChecks == 0 {

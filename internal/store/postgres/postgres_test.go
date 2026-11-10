@@ -402,3 +402,57 @@ func TestTasks(t *testing.T) {
 		t.Fatal("an over-long title must violate the CHECK constraint")
 	}
 }
+
+func TestCheckHistory(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	a, err := s.AddService(ctx, store.Service{Name: "a", URL: "https://a.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.AddService(ctx, store.Service{Name: "b", URL: "https://b.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := time.Date(2026, 11, 9, 14, 0, 0, 0, time.UTC)
+	checks := []store.Check{
+		{ServiceID: a.ID, CheckedAt: h.Add(-time.Minute), OK: true, Latency: time.Second}, // before since: left out
+		{ServiceID: a.ID, CheckedAt: h.Add(5 * time.Minute), OK: true, Latency: 100 * time.Millisecond},
+		{ServiceID: a.ID, CheckedAt: h.Add(59 * time.Minute), OK: true, Latency: 201 * time.Millisecond},
+		// A timeout says nothing about how fast the service answers.
+		{ServiceID: a.ID, CheckedAt: h.Add(30 * time.Minute), OK: false, Latency: 10 * time.Second},
+		{ServiceID: a.ID, CheckedAt: h.Add(2 * time.Hour), OK: false, Latency: 10 * time.Second},
+		{ServiceID: b.ID, CheckedAt: h.Add(time.Hour), OK: true, Latency: 7 * time.Millisecond},
+	}
+	if err := s.RecordChecks(ctx, checks); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.CheckHistory(ctx, h, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[int64][]store.CheckBucket{
+		a.ID: {
+			{Start: h, Total: 3, OK: 2, AvgLatency: 151 * time.Millisecond}, // 150.5 rounds to 151
+			{Start: h.Add(2 * time.Hour), Total: 1, OK: 0, AvgLatency: 0},
+		},
+		b.ID: {{Start: h.Add(time.Hour), Total: 1, OK: 1, AvgLatency: 7 * time.Millisecond}},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("history for %d services, want %d: %+v", len(got), len(want), got)
+	}
+	for id, buckets := range want {
+		if len(got[id]) != len(buckets) {
+			t.Fatalf("service %d: %+v, want %+v", id, got[id], buckets)
+		}
+		for i, w := range buckets {
+			g := got[id][i]
+			if !g.Start.Equal(w.Start) || g.Total != w.Total || g.OK != w.OK || g.AvgLatency != w.AvgLatency {
+				t.Errorf("service %d slot %d = %+v, want %+v", id, i, g, w)
+			}
+		}
+	}
+}

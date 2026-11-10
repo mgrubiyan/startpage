@@ -35,6 +35,11 @@ type fakeStore struct {
 	nextID    int64
 	since     time.Time
 	failWith  error
+
+	history      map[int64][]store.CheckBucket
+	historyErr   error
+	historySince time.Time
+	historySlot  time.Duration
 }
 
 func newFakeStore() *fakeStore {
@@ -207,6 +212,16 @@ func (f *fakeStore) DeleteService(_ context.Context, id int64) error {
 		}
 	}
 	return store.ErrNotFound
+}
+
+func (f *fakeStore) CheckHistory(_ context.Context, since time.Time, slot time.Duration) (map[int64][]store.CheckBucket, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.historySince, f.historySlot = since, slot
+	if f.historyErr != nil {
+		return nil, f.historyErr
+	}
+	return f.history, f.failWith
 }
 
 // fakeSource is an in-memory stand-in for a *cache.Cache that records requested keys.
