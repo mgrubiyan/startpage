@@ -66,9 +66,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .chip-label { font-size: 12px; color: var(--muted); }
 .chip-value { font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.up, .down { font-size: 10px; margin: 0 6px 0 3px; vertical-align: 1px; }
-.up { color: #2e9d57; }
-.down { color: var(--danger); }
+/* The CBR chip's arrows. Scoped: as bare .up/.down they also shrank and
+   shifted anything else named so, like the status bars. */
+.chip-value :is(.up, .down) { font-size: 10px; margin: 0 6px 0 3px; vertical-align: 1px; }
+.chip-value .up { color: #2e9d57; }
+.chip-value .down { color: var(--danger); }
 
 .search { position: relative; margin-bottom: 36px; }
 .search input {
@@ -255,7 +257,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: var(--surface);
   border: 1px solid var(--border);
 }
+.services li { flex-wrap: wrap; row-gap: 8px; }
 .services .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A day of hourly slots under the name, lined up with it (dot 8px + gap 10px). */
+.bars { flex-basis: 100%; display: flex; gap: 2px; height: 14px; padding-left: 18px; }
+.bars i { flex: 1; border-radius: 2px; background: var(--border); min-width: 0; }
+.bars i.ok { background: #2e9d57; }
+.bars i.part { background: #e0a43a; }
+.bars i.down { background: var(--danger); }
+@media (hover: hover) and (pointer: fine) {
+  .bars i { transition: opacity .12s ease; }
+  .bars:hover i:not(:hover) { opacity: .55; }
+}
 .services .meta { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .dot.ok { background: #2e9d57; }

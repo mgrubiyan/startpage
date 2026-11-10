@@ -359,6 +359,36 @@ function serviceMeta(s) {
   return `${head} · ${s.uptime.toFixed(Number.isInteger(s.uptime) ? 0 : 1)}% за сутки`;
 }
 
+const hhmm = (d) => d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
+// A day of hourly slots, oldest first, like a status page: green when every
+// check passed, amber when some failed, red when none passed, grey when unchecked.
+function historyBars(history) {
+  const row = el('div', 'bars');
+  row.setAttribute('role', 'img');
+  const checked = history.filter((h) => h.total > 0);
+  const ok = checked.reduce((n, h) => n + h.ok, 0);
+  const total = checked.reduce((n, h) => n + h.total, 0);
+  row.setAttribute('aria-label', total
+    ? `За сутки: ${Math.round((ok / total) * 1000) / 10}% успешных проверок`
+    : 'За сутки проверок не было');
+  history.forEach((h) => {
+    const start = new Date(h.start);
+    const end = new Date(start.getTime() + 60 * 60 * 1000);
+    const cls = !h.total ? '' : h.ok === h.total ? 'ok' : h.ok === 0 ? 'down' : 'part';
+    const bar = el('i', cls);
+    const span = `${hhmm(start)}–${hhmm(end)}`;
+    if (!h.total) {
+      bar.title = `${span} · не проверялся`;
+    } else {
+      const pct = Math.round((h.ok / h.total) * 1000) / 10;
+      bar.title = `${span} · ${pct}% (${h.ok} из ${h.total})` + (h.ok ? ` · ${h.latencyMs} мс` : '');
+    }
+    row.append(bar);
+  });
+  return row;
+}
+
 async function loadServices() {
   try {
     const items = await api('/api/services');
@@ -390,6 +420,7 @@ async function loadServices() {
         }
       });
       li.append(rm);
+      if (s.history && s.history.length) li.append(historyBars(s.history));
       ul.append(li);
     });
   } catch (e) {
