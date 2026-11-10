@@ -27,8 +27,9 @@ are visible to Google.
 - **Markets**: BTC, ETH, SOL and TON from Binance, falling back to Bybit, and the
   IMOEX index with blue chips from the Moscow Exchange (15 minutes delayed, as
   its free data is). Each exchange is cached on its own, so one being down still
-  shows the other. Off on the public demo: the exchanges give their data free for
-  personal use, not for showing on a public site.
+  shows the other. Off on the public demo: MOEX requires a contract to display its
+  data to the public, and Binance has no policy that clearly allows it, while a
+  personal instance behind a login is plain personal use.
 - **Painting of the day**: a public-domain (CC0) work from the Cleveland Museum of Art as the
   background, under a dark glass theme, with a caption linking to the museum's page.
 - **Bookmarks and settings**: stored in Postgres.

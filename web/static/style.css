@@ -397,10 +397,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .quotes .name { color: var(--muted); font-size: 13px; margin-left: 6px; }
 .quotes .price { white-space: nowrap; }
 .quotes .chg { text-align: right; font-size: 13px; white-space: nowrap; color: var(--muted); }
-.quotes .chg.up { color: #2e9d57; }
-.quotes .chg.down { color: var(--danger); }
-.has-art .quotes .chg.up { color: #6fd894; }
-.has-art .quotes .chg.down { color: #ff8a8a; }
+/* pos/neg, not up/down: those carry the CBR arrows' size and margins. */
+.quotes .chg.pos { color: #2e9d57; }
+.quotes .chg.neg { color: var(--danger); }
+.has-art .quotes .chg.pos { color: #6fd894; }
+.has-art .quotes .chg.neg { color: #ff8a8a; }
 .quotes li.empty { display: block; color: var(--muted); font-size: 13px; }
 .market.stale .quotes li { opacity: .7; }
 

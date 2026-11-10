@@ -209,7 +209,7 @@ function fmtChange(pct) {
   if (r === 0) return { text: '0,00%', cls: '' };
   return {
     text: (r > 0 ? '+' : '−') + Math.abs(r).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%',
-    cls: r > 0 ? 'up' : 'down',
+    cls: r > 0 ? 'pos' : 'neg',
   };
 }
 

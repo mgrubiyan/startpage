@@ -20,7 +20,7 @@ type MarketSource interface {
 // separate agreement to display its data to the public, and Binance has no
 // policy that clearly allows it; a personal instance behind a login is the
 // individual use both serve for free.
-const demoMarketsReason = "В публичном демо котировки отключены: биржи разрешают бесплатно показывать их только для личного пользования."
+const demoMarketsReason = "В публичном демо котировки отключены: Мосбиржа требует договор для публичного показа своих данных, а Binance такой показ явно не разрешает. На личной странице за паролем они работают."
 
 type quoteDTO struct {
 	Symbol   string     `json:"symbol"`
