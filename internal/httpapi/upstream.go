@@ -33,14 +33,58 @@ type SuggestSource interface {
 const maxSuggestQueryRunes = 100
 
 type weatherDTO struct {
-	Location    string    `json:"location"`
-	Temperature float64   `json:"temperature"`
-	FeelsLike   float64   `json:"feelsLike"`
-	WindMS      float64   `json:"windMs"`
-	Description string    `json:"description"`
-	Icon        string    `json:"icon"`
-	FetchedAt   time.Time `json:"fetchedAt"`
-	Stale       bool      `json:"stale"`
+	Location    string  `json:"location"`
+	Temperature float64 `json:"temperature"`
+	FeelsLike   float64 `json:"feelsLike"`
+	WindMS      float64 `json:"windMs"`
+	Description string  `json:"description"`
+	Icon        string  `json:"icon"`
+	// Days is the forecast from today on, in the city's own calendar.
+	Days      []forecastDayDTO `json:"days"`
+	FetchedAt time.Time        `json:"fetchedAt"`
+	Stale     bool             `json:"stale"`
+}
+
+// forecastDayDTO is one day of the forecast. Sunrise and sunset are wall-clock
+// "HH:MM" in the city, so the page needn't know its time zone; they are absent
+// on a day the sun doesn't rise or set.
+type forecastDayDTO struct {
+	Date            string  `json:"date"` // YYYY-MM-DD
+	Min             float64 `json:"min"`
+	Max             float64 `json:"max"`
+	Description     string  `json:"description"`
+	Icon            string  `json:"icon"`
+	Precipitation   *int    `json:"precipitation"` // chance in percent; null if unknown
+	Sunrise         string  `json:"sunrise,omitempty"`
+	Sunset          string  `json:"sunset,omitempty"`
+	DaylightMinutes int     `json:"daylightMinutes,omitempty"`
+}
+
+// forecastDays drops days that are already over in the city: a report served
+// stale after an upstream outage may begin with yesterday.
+func forecastDays(rep weather.Report, now time.Time) []forecastDayDTO {
+	today := now.UTC().Add(rep.UTCOffset).Format(time.DateOnly)
+	out := make([]forecastDayDTO, 0, len(rep.Days))
+	for _, d := range rep.Days {
+		if d.Date < today {
+			continue
+		}
+		dto := forecastDayDTO{
+			Date:          d.Date,
+			Min:           d.MinC,
+			Max:           d.MaxC,
+			Description:   d.Description,
+			Icon:          d.Icon,
+			Precipitation: d.PrecipitationPct,
+		}
+		if !d.Sunrise.IsZero() && !d.Sunset.IsZero() {
+			dto.Sunrise = d.Sunrise.Format("15:04")
+			dto.Sunset = d.Sunset.Format("15:04")
+			dto.DaylightMinutes = int(d.Sunset.Sub(d.Sunrise).Minutes())
+		}
+		out = append(out, dto)
+	}
+	return out
 }
 
 type rateDTO struct {
@@ -84,6 +128,7 @@ func (a *api) getWeather(w http.ResponseWriter, r *http.Request) {
 		WindMS:      rep.WindMS,
 		Description: rep.Description,
 		Icon:        rep.Icon,
+		Days:        forecastDays(rep, a.now()),
 		FetchedAt:   res.FetchedAt,
 		Stale:       res.Stale,
 	})

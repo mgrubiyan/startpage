@@ -26,6 +26,7 @@ type Store interface {
 	DeleteTask(ctx context.Context, id int64) error
 	DeleteDoneTasks(ctx context.Context) (int64, error)
 	ServiceStatuses(ctx context.Context, since time.Time) ([]store.ServiceStatus, error)
+	CheckHistory(ctx context.Context, since time.Time, slot time.Duration) (map[int64][]store.CheckBucket, error)
 	AddService(ctx context.Context, s store.Service) (store.Service, error)
 	DeleteService(ctx context.Context, id int64) error
 }
@@ -71,6 +72,37 @@ type serviceDTO struct {
 	URL       string    `json:"url"`
 	LastCheck *checkDTO `json:"lastCheck"`
 	Uptime    *float64  `json:"uptime"` // percent over UptimeWindow; null until checked
+	// History is HistorySlots hourly slots, oldest first, the last one being
+	// the current, unfinished hour. A slot without checks has total 0.
+	History []slotDTO `json:"history"`
+}
+
+type slotDTO struct {
+	Start     time.Time `json:"start"`
+	Total     int       `json:"total"`
+	OK        int       `json:"ok"`
+	LatencyMs int64     `json:"latencyMs"` // average over successful checks; 0 if none
+}
+
+// HistorySlots hourly slots make up a service's history: one day.
+const HistorySlots = 24
+
+// historySlots lays a service's non-empty buckets onto a dense row of hourly
+// slots ending with the hour now is in, so the page draws it as is.
+func historySlots(buckets []store.CheckBucket, now time.Time) []slotDTO {
+	first := now.UTC().Truncate(time.Hour).Add(-(HistorySlots - 1) * time.Hour)
+	out := make([]slotDTO, HistorySlots)
+	for i := range out {
+		out[i].Start = first.Add(time.Duration(i) * time.Hour)
+	}
+	for _, b := range buckets {
+		i := int(b.Start.Sub(first) / time.Hour)
+		if i < 0 || i >= HistorySlots || !b.Start.Equal(out[i].Start) {
+			continue // outside the window or not on the hour: not this row's slot
+		}
+		out[i].Total, out[i].OK, out[i].LatencyMs = b.Total, b.OK, b.AvgLatency.Milliseconds()
+	}
+	return out
 }
 
 type api struct {
@@ -79,6 +111,8 @@ type api struct {
 	rates   RatesSource
 	suggest SuggestSource
 	art     ArtSource
+	crypto  MarketSource
+	stocks  MarketSource
 	auth    Authenticator
 	limiter RateLimiter
 	logger  *slog.Logger
@@ -193,9 +227,18 @@ func (a *api) listServices(w http.ResponseWriter, r *http.Request) {
 		a.internalError(w, r, err)
 		return
 	}
+	now := a.now()
+	// The bars are a nice-to-have: without them the list still shows status and uptime.
+	history, err := a.store.CheckHistory(r.Context(), now.UTC().Truncate(time.Hour).Add(-(HistorySlots-1)*time.Hour), time.Hour)
+	if err != nil && r.Context().Err() == nil {
+		a.logger.WarnContext(r.Context(), "check history failed", "err", err)
+	}
 	out := make([]serviceDTO, 0, len(statuses))
 	for _, st := range statuses {
-		dto := serviceDTO{ID: st.ID, Name: st.Name, URL: st.URL}
+		dto := serviceDTO{ID: st.ID, Name: st.Name, URL: st.URL, History: []slotDTO{}}
+		if err == nil {
+			dto.History = historySlots(history[st.ID], now)
+		}
 		if st.Last != nil {
 			dto.LastCheck = &checkDTO{
 				OK:         st.Last.OK,

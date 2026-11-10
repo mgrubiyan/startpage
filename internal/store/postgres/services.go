@@ -99,6 +99,46 @@ func (s *Store) PruneChecks(ctx context.Context, before time.Time) (int64, error
 	return tag.RowsAffected(), nil
 }
 
+// CheckHistory groups the checks since a time into slots of the given width,
+// aligned to whole multiples of it since the Unix epoch (so hourly slots start
+// on the hour), and returns each service's non-empty slots in time order.
+func (s *Store) CheckHistory(ctx context.Context, since time.Time, slot time.Duration) (map[int64][]store.CheckBucket, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT service_id,
+		       date_bin($2::interval, checked_at, TIMESTAMPTZ 'epoch') AS slot,
+		       count(*),
+		       count(*) FILTER (WHERE ok),
+		       coalesce(avg(latency_ms) FILTER (WHERE ok), 0)::float8
+		FROM service_checks
+		WHERE checked_at >= $1
+		GROUP BY 1, 2
+		ORDER BY 1, 2`, since, slot)
+	if err != nil {
+		return nil, fmt.Errorf("select check history: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[int64][]store.CheckBucket)
+	for rows.Next() {
+		var (
+			id        int64
+			b         store.CheckBucket
+			total, ok int64
+			avgMs     float64
+		)
+		if err := rows.Scan(&id, &b.Start, &total, &ok, &avgMs); err != nil {
+			return nil, fmt.Errorf("scan check history: %w", err)
+		}
+		b.Total, b.OK = int(total), int(ok)
+		b.AvgLatency = time.Duration(math.Round(avgMs)) * time.Millisecond
+		out[id] = append(out[id], b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("select check history: %w", err)
+	}
+	return out, nil
+}
+
 // ServiceStatuses returns every service with its latest check and the
 // number of total/successful checks since the given time.
 func (s *Store) ServiceStatuses(ctx context.Context, since time.Time) ([]store.ServiceStatus, error) {
