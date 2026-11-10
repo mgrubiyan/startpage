@@ -373,6 +373,37 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .forecast .temps { font-size: 12px; }
 }
 
+/* ---------- markets ---------- */
+.markets { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+@media (max-width: 640px) { .markets { grid-template-columns: 1fr; } }
+.markets .note-line { grid-column: 1 / -1; color: var(--muted); font-size: 13px; margin: 0; }
+.market { min-width: 0; }
+.market-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); margin: 0 4px 6px; }
+.market-head .src { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.quotes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.quotes li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 4.6em;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.quotes .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quotes .sym { font-weight: 600; }
+.quotes .name { color: var(--muted); font-size: 13px; margin-left: 6px; }
+.quotes .price { white-space: nowrap; }
+.quotes .chg { text-align: right; font-size: 13px; white-space: nowrap; color: var(--muted); }
+.quotes .chg.up { color: #2e9d57; }
+.quotes .chg.down { color: var(--danger); }
+.has-art .quotes .chg.up { color: #6fd894; }
+.has-art .quotes .chg.down { color: #ff8a8a; }
+.quotes li.empty { display: block; color: var(--muted); font-size: 13px; }
+.market.stale .quotes li { opacity: .7; }
+
 .error { color: var(--danger); font-size: 13px; flex-basis: 100%; }
 .muted { color: var(--muted); font-size: 13px; }
 [hidden] { display: none !important; }
@@ -435,7 +466,7 @@ body.has-art {
 }
 .has-art :is(.chip, .search input, .suggestions, .bookmarks a, .services li, .demo-banner,
   .inline-form input, .settings input, .settings select, .login-card, .ghost:hover, .ghost[aria-pressed="true"],
-  .tasks li, .task-form input, .note, .forecast li) {
+  .tasks li, .task-form input, .note, .forecast li, .quotes li) {
   /* 12px reads the same as more and costs far less with dozens of tiles on a phone. */
   -webkit-backdrop-filter: blur(12px) saturate(150%);
   backdrop-filter: blur(12px) saturate(150%);

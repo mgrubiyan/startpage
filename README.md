@@ -24,6 +24,11 @@ are visible to Google.
   sunset and day length (Open-Meteo), and the CBR daily feed, cached server-side.
   Forecast days and sun times are in the city's own time zone, not the server's
   or the browser's.
+- **Markets**: BTC, ETH, SOL and TON from Binance, falling back to Bybit, and the
+  IMOEX index with blue chips from the Moscow Exchange (15 minutes delayed, as
+  its free data is). Each exchange is cached on its own, so one being down still
+  shows the other. Off on the public demo: the exchanges give their data free for
+  personal use, not for showing on a public site.
 - **Painting of the day**: a public-domain (CC0) work from the Cleveland Museum of Art as the
   background, under a dark glass theme, with a caption linking to the museum's page.
 - **Bookmarks and settings**: stored in Postgres.
@@ -45,6 +50,7 @@ internal/cache           generic TTL cache: singleflight, stale-on-error, bounde
 internal/fetch           shared HTTP client + JSON helper with body size limit
 internal/weather         Open-Meteo geocoding + forecast client
 internal/rates           CBR daily rates client
+internal/markets         Binance, Bybit and MOEX ISS quote clients, with fallback
 internal/suggest         search suggestions client (Google → DuckDuckGo fallback)
 internal/art             painting of the day: Cleveland Museum of Art Open Access client + daily holder
 internal/monitor         ticker-driven prober with a bounded worker pool, down/up alerts
@@ -206,6 +212,7 @@ are open and writes are refused). JSON in, JSON out.
 | `DELETE` | `/api/services/{id}` | |
 | `GET` | `/api/weather` | current weather and a five-day forecast (`days`, with sunrise/sunset) for the configured city |
 | `GET` | `/api/rates` | USD and EUR from the CBR, with previous values |
+| `GET` | `/api/markets` | crypto and MOEX boards, each with its source, delay and `stale`/`error`; `available: false` with a `reason` on the demo |
 | `GET` | `/api/suggest?q=` | search suggestions |
 | `GET` | `/api/art` | today's painting: `{"title", "artist", "date", "url", "image"}` |
 | `GET` | `/api/art/image?v=` | the painting as JPEG (the one non-JSON response) |
