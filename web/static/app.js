@@ -775,7 +775,11 @@ $('tasks-clear').addEventListener('click', async () => {
 // - text from the server never replaces the textarea while there are edits it
 //   hasn't seen, which would also move the cursor.
 const noteEl = $('note');
-const note = { edits: 0, savedEdits: 0, inFlight: false, again: false, timer: 0 };
+const note = { edits: 0, savedEdits: 0, inFlight: false, again: false, timer: 0, loaded: false };
+// Read-only until the server's text is in: the rest of the page opens from the
+// kept copy at once, and typing into the still empty field would save that
+// empty draft over the real note.
+noteEl.readOnly = true;
 
 function fmtSaved(iso) {
   const d = new Date(iso);
@@ -794,6 +798,8 @@ async function loadNote() {
     const n = await api('/api/note');
     if (note.edits !== before || noteDirty()) return; // typed meanwhile: keep the local text
     if (noteEl.value !== n.text) noteEl.value = n.text;
+    note.loaded = true;
+    noteEl.readOnly = isDemo();
     noteStatus(n.text ? 'сохранено ' + fmtSaved(n.updatedAt) : '');
   } catch (e) {
     if (!ignorable(e)) noteStatus('не загрузилась: ' + e.message);
@@ -912,7 +918,7 @@ function clearArt() {
 function applyMeta(meta) {
   document.body.classList.toggle('demo', meta.demo);
   $('demo-banner').hidden = !meta.demo;
-  noteEl.readOnly = meta.demo;
+  noteEl.readOnly = meta.demo || !note.loaded;
 }
 
 async function loadMeta() {

@@ -170,13 +170,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 :is(.ghost, .inline-form button, .settings button, .login-card button):active { transform: scale(.97); }
 @media (hover: hover) and (pointer: fine) {
   .ghost:hover { color: var(--text); background: var(--surface); }
-  .bookmarks a:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .bookmarks a:hover { border-color: var(--accent); }
+  /* Not while pressed: a mouse press is always also a hover, and the lift
+     would override the press scale above. */
+  .bookmarks a:hover:not(:active) { transform: translateY(-1px); }
   .art-caption[href]:hover { color: #fff; background: rgba(0, 0, 0, .5); }
 }
 /* Less motion means nothing drifts on its own: the tiles no longer lift under
    the pointer. A press still answers, and fades stay, since they don't move. */
 @media (prefers-reduced-motion: reduce) {
-  .bookmarks a:hover { transform: none; }
+  .bookmarks a:hover:not(:active) { transform: none; }
 }
 .icon {
   width: 32px;
