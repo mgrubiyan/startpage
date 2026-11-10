@@ -10,3 +10,4 @@ extension
 coverage.*
 docs
 deploy
+e2e
