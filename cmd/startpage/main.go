@@ -20,6 +20,7 @@ import (
 	"github.com/mgrubiyan/startpage/internal/demo"
 	"github.com/mgrubiyan/startpage/internal/fetch"
 	"github.com/mgrubiyan/startpage/internal/httpapi"
+	"github.com/mgrubiyan/startpage/internal/markets"
 	"github.com/mgrubiyan/startpage/internal/monitor"
 	"github.com/mgrubiyan/startpage/internal/rates"
 	"github.com/mgrubiyan/startpage/internal/store/postgres"
@@ -122,6 +123,23 @@ func run() error {
 	suggestClient := suggest.New(upstream)
 	// Its own client: a 3–6 MB painting needs longer than the 10 s API timeout.
 	// Per request; one whole load (up to 3 attempts) gets 2 min in art.Daily.
+	// Quotes only on a personal instance: the exchanges' free data is for
+	// personal use, not for showing on a public site (see httpapi.getMarkets).
+	var cryptoBoard, stocksBoard httpapi.MarketSource
+	if !cfg.Demo {
+		crypto := markets.Fallback(
+			markets.WithTimeout(markets.NewBinance(upstream, markets.DefaultCoins).Board, 4*time.Second),
+			markets.WithTimeout(markets.NewBybit(upstream, markets.DefaultCoins).Board, 4*time.Second),
+		)
+		moex := markets.NewMOEX(upstream, markets.DefaultIndex, markets.DefaultShares)
+		cryptoBoard = cache.New(time.Minute, func(ctx context.Context, _ string) (markets.Board, error) {
+			return crypto(ctx)
+		}, cache.WithLoadTimeout(9*time.Second))
+		// MOEX's free data is 15 minutes late anyway; a few minutes more of cache costs nothing.
+		stocksBoard = cache.New(3*time.Minute, func(ctx context.Context, _ string) (markets.Board, error) {
+			return moex.Board(ctx)
+		}, cache.WithLoadTimeout(8*time.Second))
+	}
 	artwork := art.NewDaily(art.New(&http.Client{Timeout: 30 * time.Second}).Pick)
 	go func() {
 		// Load ahead of visitors, at startup and soon after each UTC midnight,
@@ -151,6 +169,8 @@ func run() error {
 		}),
 		Suggest:           cache.New(time.Hour, suggestClient.Suggest, cache.WithLoadTimeout(3*time.Second)),
 		Art:               artwork,
+		Crypto:            cryptoBoard,
+		Stocks:            stocksBoard,
 		Auth:              authService,
 		LoginLimiter:      auth.NewLimiter(5, time.Minute),
 		SecureCookie:      cfg.SecureCookie,

@@ -192,6 +192,63 @@ function renderForecast(days, stale, emptyText = 'Нет данных') {
   });
 }
 
+// ---------- markets ----------
+const RUB = ' ₽';
+
+function fmtPrice(q) {
+  // Big prices read better without kopecks/cents; small coins need them.
+  const digits = q.price >= 1000 ? 0 : q.price >= 1 ? 2 : 4;
+  const s = q.price.toLocaleString('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  if (q.currency === 'RUB') return s + RUB;
+  if (q.currency === 'USDT') return '$' + s;
+  return s; // an index, in points
+}
+
+function fmtChange(pct) {
+  const r = Math.round(pct * 100) / 100;
+  if (r === 0) return { text: '0,00%', cls: '' };
+  return {
+    text: (r > 0 ? '+' : '−') + Math.abs(r).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%',
+    cls: r > 0 ? 'pos' : 'neg',
+  };
+}
+
+function marketBoard(title, b) {
+  const box = el('div', 'market' + (b.stale ? ' stale' : ''));
+  const head = el('div', 'market-head');
+  const src = [b.source, b.delayMinutes ? `задержка ${b.delayMinutes} мин` : ''].filter(Boolean).join(' · ');
+  head.append(el('span', null, title), el('span', 'src', src));
+  const ul = el('ul', 'quotes');
+  if (b.error || !b.quotes.length) ul.append(el('li', 'empty', b.error ? 'Биржа недоступна' : 'Нет котировок'));
+  b.quotes.forEach((q) => {
+    const li = el('li');
+    const who = el('span', 'who');
+    who.append(el('span', 'sym', q.symbol), el('span', 'name', q.name));
+    const chg = fmtChange(q.change);
+    li.append(who, el('span', 'price', fmtPrice(q)), el('span', 'chg ' + chg.cls, chg.text));
+    const at = q.at ? new Date(q.at).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+    li.title = [q.name, at && 'цена на ' + at, b.stale && 'данные устарели'].filter(Boolean).join('\n');
+    ul.append(li);
+  });
+  box.append(head, ul);
+  return box;
+}
+
+async function loadMarkets() {
+  const root = $('markets');
+  try {
+    const m = await api('/api/markets');
+    root.textContent = '';
+    if (!m.available) { root.append(el('p', 'note-line', m.reason || 'Котировки недоступны')); return; }
+    if (m.crypto) root.append(marketBoard('Криптовалюты', m.crypto));
+    if (m.stocks) root.append(marketBoard('Акции', m.stocks));
+  } catch (e) {
+    if (ignorable(e)) return;
+    root.textContent = '';
+    root.append(el('p', 'note-line', 'Биржи недоступны: ' + e.message));
+  }
+}
+
 // ---------- rates ----------
 async function loadRates() {
   const box = $('rates-value');
@@ -302,6 +359,36 @@ function serviceMeta(s) {
   return `${head} · ${s.uptime.toFixed(Number.isInteger(s.uptime) ? 0 : 1)}% за сутки`;
 }
 
+const hhmm = (d) => d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
+// A day of hourly slots, oldest first, like a status page: green when every
+// check passed, amber when some failed, red when none passed, grey when unchecked.
+function historyBars(history) {
+  const row = el('div', 'bars');
+  row.setAttribute('role', 'img');
+  const checked = history.filter((h) => h.total > 0);
+  const ok = checked.reduce((n, h) => n + h.ok, 0);
+  const total = checked.reduce((n, h) => n + h.total, 0);
+  row.setAttribute('aria-label', total
+    ? `За сутки: ${Math.round((ok / total) * 1000) / 10}% успешных проверок`
+    : 'За сутки проверок не было');
+  history.forEach((h) => {
+    const start = new Date(h.start);
+    const end = new Date(start.getTime() + 60 * 60 * 1000);
+    const cls = !h.total ? '' : h.ok === h.total ? 'ok' : h.ok === 0 ? 'down' : 'part';
+    const bar = el('i', cls);
+    const span = `${hhmm(start)}–${hhmm(end)}`;
+    if (!h.total) {
+      bar.title = `${span} · не проверялся`;
+    } else {
+      const pct = Math.round((h.ok / h.total) * 1000) / 10;
+      bar.title = `${span} · ${pct}% (${h.ok} из ${h.total})` + (h.ok ? ` · ${h.latencyMs} мс` : '');
+    }
+    row.append(bar);
+  });
+  return row;
+}
+
 async function loadServices() {
   try {
     const items = await api('/api/services');
@@ -333,6 +420,7 @@ async function loadServices() {
         }
       });
       li.append(rm);
+      if (s.history && s.history.length) li.append(historyBars(s.history));
       ul.append(li);
     });
   } catch (e) {
@@ -646,6 +734,7 @@ document.addEventListener('visibilitychange', () => {
     // Another tab may have changed both while this one was in the background.
     loadNote();
     loadTasks();
+    loadMarkets();
   }
 });
 
@@ -729,6 +818,7 @@ async function boot() {
   updateHint();
   loadWeather();
   loadRates();
+  loadMarkets();
   loadBookmarks();
   loadTasks();
   loadNote();
@@ -738,6 +828,8 @@ async function boot() {
   every(loadArt, 60 * 60 * 1000); // a tab left open overnight gets the next day's painting
   every(loadWeather, 10 * 60 * 1000);
   every(loadRates, 60 * 60 * 1000);
+  // Prices move by the minute, but a tab in the background needn't keep asking.
+  every(() => { if (document.visibilityState === 'visible') loadMarkets(); }, 60 * 1000);
   every(loadServices, 30 * 1000);
 }
 
