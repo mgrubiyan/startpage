@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/mgrubiyan/startpage/internal/store"
@@ -84,21 +85,29 @@ type slotDTO struct {
 	LatencyMs int64     `json:"latencyMs"` // average over successful checks; 0 if none
 }
 
-// HistorySlots hourly slots make up a service's history: one day.
-const HistorySlots = 24
+// A service's history is HistorySlots slots of historySlot each: one day by the hour.
+const (
+	HistorySlots = 24
+	historySlot  = time.Hour
+)
 
-// historySlots lays a service's non-empty buckets onto a dense row of hourly
-// slots ending with the hour now is in, so the page draws it as is.
-func historySlots(buckets []store.CheckBucket, now time.Time) []slotDTO {
-	first := now.UTC().Truncate(time.Hour).Add(-(HistorySlots - 1) * time.Hour)
+// historyStart is where the history row begins: the start of the slot now is
+// in, HistorySlots-1 slots back. Both the store query and the layout use it.
+func historyStart(now time.Time) time.Time {
+	return now.UTC().Truncate(historySlot).Add(-(HistorySlots - 1) * historySlot)
+}
+
+// historySlots lays a service's non-empty buckets onto a dense row of slots
+// from first, so the page draws it as is.
+func historySlots(buckets []store.CheckBucket, first time.Time) []slotDTO {
 	out := make([]slotDTO, HistorySlots)
 	for i := range out {
-		out[i].Start = first.Add(time.Duration(i) * time.Hour)
+		out[i].Start = first.Add(time.Duration(i) * historySlot)
 	}
 	for _, b := range buckets {
-		i := int(b.Start.Sub(first) / time.Hour)
+		i := int(b.Start.Sub(first) / historySlot)
 		if i < 0 || i >= HistorySlots || !b.Start.Equal(out[i].Start) {
-			continue // outside the window or not on the hour: not this row's slot
+			continue // outside the window or not on a slot boundary
 		}
 		out[i].Total, out[i].OK, out[i].LatencyMs = b.Total, b.OK, b.AvgLatency.Milliseconds()
 	}
@@ -222,22 +231,31 @@ func (a *api) deleteBookmark(w http.ResponseWriter, r *http.Request) {
 // ---------- services ----------
 
 func (a *api) listServices(w http.ResponseWriter, r *http.Request) {
-	statuses, err := a.store.ServiceStatuses(r.Context(), a.now().Add(-UptimeWindow))
+	// One instant for the whole response, so the uptime and the bars agree on the hour.
+	now := a.now()
+	first := historyStart(now)
+	var (
+		wg         sync.WaitGroup
+		history    map[int64][]store.CheckBucket
+		historyErr error
+	)
+	// The page polls this every 30s; the two queries needn't wait for each other.
+	wg.Go(func() { history, historyErr = a.store.CheckHistory(r.Context(), first, historySlot) })
+	statuses, err := a.store.ServiceStatuses(r.Context(), now.Add(-UptimeWindow))
+	wg.Wait()
 	if err != nil {
 		a.internalError(w, r, err)
 		return
 	}
-	now := a.now()
 	// The bars are a nice-to-have: without them the list still shows status and uptime.
-	history, err := a.store.CheckHistory(r.Context(), now.UTC().Truncate(time.Hour).Add(-(HistorySlots-1)*time.Hour), time.Hour)
-	if err != nil && r.Context().Err() == nil {
-		a.logger.WarnContext(r.Context(), "check history failed", "err", err)
+	if historyErr != nil && r.Context().Err() == nil {
+		a.logger.WarnContext(r.Context(), "check history failed", "err", historyErr)
 	}
 	out := make([]serviceDTO, 0, len(statuses))
 	for _, st := range statuses {
 		dto := serviceDTO{ID: st.ID, Name: st.Name, URL: st.URL, History: []slotDTO{}}
-		if err == nil {
-			dto.History = historySlots(history[st.ID], now)
+		if historyErr == nil {
+			dto.History = historySlots(history[st.ID], first)
 		}
 		if st.Last != nil {
 			dto.LastCheck = &checkDTO{

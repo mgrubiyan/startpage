@@ -250,14 +250,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .services { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
 .services li {
   display: flex;
+  flex-wrap: wrap; /* the uptime bars take a line of their own */
   align-items: center;
-  gap: 10px;
+  gap: 8px 10px;
   padding: 10px 14px;
   border-radius: 12px;
   background: var(--surface);
   border: 1px solid var(--border);
 }
-.services li { flex-wrap: wrap; row-gap: 8px; }
 .services .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A day of hourly slots under the name, lined up with it (dot 8px + gap 10px). */
 .bars { flex-basis: 100%; display: flex; gap: 2px; height: 14px; padding-left: 18px; }

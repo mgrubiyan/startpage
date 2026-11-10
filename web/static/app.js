@@ -350,28 +350,32 @@ $('add-bookmark').addEventListener('submit', async (e) => {
 });
 
 // ---------- services ----------
+// The demo's own health check answers in under a millisecond; "0 мс" would read as broken.
+const fmtMs = (ms) => (ms < 1 ? '<1 мс' : `${ms} мс`);
+const fmtPct = (p) => p.toFixed(Number.isInteger(p) ? 0 : 1);
+
 function serviceMeta(s) {
   const c = s.lastCheck;
   if (!c) return 'ещё не проверялся';
-  const latency = c.latencyMs < 1 ? '<1 мс' : `${c.latencyMs} мс`;
+  const latency = fmtMs(c.latencyMs);
   const head = c.ok ? latency : (c.statusCode ? `HTTP ${c.statusCode}` : 'недоступен');
   if (s.uptime == null) return head;
-  return `${head} · ${s.uptime.toFixed(Number.isInteger(s.uptime) ? 0 : 1)}% за сутки`;
+  return `${head} · ${fmtPct(s.uptime)}% за сутки`;
 }
+
+let servicesKey = ''; // the last /api/services answer drawn
 
 const hhmm = (d) => d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
 // A day of hourly slots, oldest first, like a status page: green when every
 // check passed, amber when some failed, red when none passed, grey when unchecked.
-function historyBars(history) {
+function historyBars(history, uptime) {
   const row = el('div', 'bars');
   row.setAttribute('role', 'img');
-  const checked = history.filter((h) => h.total > 0);
-  const ok = checked.reduce((n, h) => n + h.ok, 0);
-  const total = checked.reduce((n, h) => n + h.total, 0);
-  row.setAttribute('aria-label', total
-    ? `За сутки: ${Math.round((ok / total) * 1000) / 10}% успешных проверок`
-    : 'За сутки проверок не было');
+  // The same daily figure the row shows, not one recomputed over whole hours.
+  row.setAttribute('aria-label', uptime != null
+    ? `Аптайм по часам за сутки, всего ${fmtPct(uptime)}%`
+    : 'Аптайм по часам за сутки: проверок не было');
   history.forEach((h) => {
     const start = new Date(h.start);
     const end = new Date(start.getTime() + 60 * 60 * 1000);
@@ -382,7 +386,7 @@ function historyBars(history) {
       bar.title = `${span} · не проверялся`;
     } else {
       const pct = Math.round((h.ok / h.total) * 1000) / 10;
-      bar.title = `${span} · ${pct}% (${h.ok} из ${h.total})` + (h.ok ? ` · ${h.latencyMs} мс` : '');
+      bar.title = `${span} · ${pct}% (${h.ok} из ${h.total})` + (h.ok ? ` · ${fmtMs(h.latencyMs)}` : '');
     }
     row.append(bar);
   });
@@ -392,6 +396,11 @@ function historyBars(history) {
 async function loadServices() {
   try {
     const items = await api('/api/services');
+    // The poll is every 30s and the monitor checks every minute or so: skip
+    // identical answers, so an open tooltip or the bars' hover isn't reset.
+    const key = JSON.stringify(items);
+    if (key === servicesKey) return;
+    servicesKey = key;
     const ul = $('services');
     ul.textContent = '';
     if (!items.length) {
@@ -420,11 +429,13 @@ async function loadServices() {
         }
       });
       li.append(rm);
-      if (s.history && s.history.length) li.append(historyBars(s.history));
+      if (s.history && s.history.length) li.append(historyBars(s.history, s.uptime));
       ul.append(li);
     });
   } catch (e) {
-    if (!ignorable(e)) $('services').textContent = 'Статусы не загрузились: ' + e.message;
+    if (ignorable(e)) return;
+    servicesKey = ''; // the message replaced the list: draw it again next time
+    $('services').textContent = 'Статусы не загрузились: ' + e.message;
   }
 }
 
