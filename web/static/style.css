@@ -7,6 +7,9 @@
   --accent: #3b6ef5;
   --danger: #d93a3a;
   --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.05);
+  /* One curve for everything that answers the user: fast at first, so the
+     response is seen at once, then settling. */
+  --ease-out: cubic-bezier(.23, 1, .32, 1);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -157,18 +160,23 @@ button, input, select, textarea { font: inherit; color: inherit; }
   color: inherit;
   background: var(--surface);
   border: 1px solid var(--border);
-  transition: transform .12s ease, border-color .12s ease;
+  transition: transform 160ms var(--ease-out), border-color .12s ease;
 }
 .bookmarks a:active { transform: scale(.97); }
 
 /* Every button answers a press. Hover only where there is a real pointer:
    on a phone a tap leaves :hover stuck until the next tap elsewhere. */
-.ghost, .inline-form button, .settings button, .login-card button { transition: transform 160ms ease-out; }
+.ghost, .inline-form button, .settings button, .login-card button { transition: transform 160ms var(--ease-out); }
 :is(.ghost, .inline-form button, .settings button, .login-card button):active { transform: scale(.97); }
 @media (hover: hover) and (pointer: fine) {
   .ghost:hover { color: var(--text); background: var(--surface); }
   .bookmarks a:hover { border-color: var(--accent); transform: translateY(-1px); }
   .art-caption[href]:hover { color: #fff; background: rgba(0, 0, 0, .5); }
+}
+/* Less motion means nothing drifts on its own: the tiles no longer lift under
+   the pointer. A press still answers, and fades stay, since they don't move. */
+@media (prefers-reduced-motion: reduce) {
+  .bookmarks a:hover { transform: none; }
 }
 .icon {
   width: 32px;
@@ -447,7 +455,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  transition: opacity 300ms cubic-bezier(.23, 1, .32, 1);
+  transition: opacity 300ms var(--ease-out);
 }
 .backdrop img.shown { opacity: 1; }
 /* The painting a new tab restores appears at once: on a page opened all day,
