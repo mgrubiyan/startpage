@@ -103,7 +103,9 @@ when the tab is hidden (as a `keepalive` request, so closing the tab doesn't los
   other control characters refused. 10 000 characters, checked by the API and by a `CHECK`.
 
 **Calendar.** A published feed is read-only and needs no Apple ID on the server: on the
-iPhone, Calendar → Calendars → ⓘ next to one → Public Calendar → Share Link.
+iPhone, Calendar → Calendars → ⓘ next to an iCloud calendar → Public Calendar → Share Link
+(only iCloud calendars can be public). Turning Public Calendar off revokes the link;
+disconnecting it here only deletes the server's copy.
 - The link is the credential: anyone who has it reads that calendar. So the API never sends a
   saved link back (settings report only how many there are, since that answer is kept in the
   browser's storage), errors and logs name only the host, and only `https` is fetched

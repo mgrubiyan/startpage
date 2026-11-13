@@ -214,6 +214,68 @@ func TestSeriesCapped(t *testing.T) {
 	}
 }
 
+// appleFeed carries what a personal iCloud calendar adds over a holiday feed:
+// a VTIMEZONE, alarms nested in events, folded long lines and Apple's
+// structured location with a quoted parameter full of commas and colons.
+var appleFeed = strings.ReplaceAll(`BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Apple Inc.//iCloud 2700B6//EN
+CALSCALE:GREGORIAN
+X-WR-CALNAME:Работа
+X-APPLE-CALENDAR-COLOR:#1BADF8
+BEGIN:VTIMEZONE
+TZID:Europe/Moscow
+BEGIN:STANDARD
+DTSTART:20110327T020000
+TZOFFSETFROM:+0300
+TZOFFSETTO:+0300
+TZNAME:MSK
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+CREATED:20261101T090000Z
+DTSTAMP:20261101T090000Z
+UID:5D1A6E2B-4F7C-4B7A-9A11-0C2A1E7F3B11
+DTSTART;TZID=Europe/Moscow:20261117T110000
+DTEND;TZID=Europe/Moscow:20261117T120000
+SUMMARY:Ревью архитектуры с командой платформы и представителями смежных
+  сервисов
+LOCATION:Невский проспект\, 28\nСанкт-Петербург\, Россия
+X-APPLE-STRUCTURED-LOCATION;VALUE=URI;X-ADDRESS="Невский проспект, 28\\n
+ Санкт-Петербург, Россия";X-APPLE-RADIUS=70;X-TITLE="Дом книги":geo:59.93
+ 5,30.326
+SEQUENCE:0
+TRANSP:OPAQUE
+BEGIN:VALARM
+X-WR-ALARMUID:9E1F3C1A-0000-4000-8000-000000000001
+UID:9E1F3C1A-0000-4000-8000-000000000001
+TRIGGER:-PT15M
+ACTION:DISPLAY
+DESCRIPTION:Напоминание
+END:VALARM
+END:VEVENT
+END:VCALENDAR
+`, "\n", "\r\n")
+
+func TestAppleFeed(t *testing.T) {
+	msk := mustZone(t, "Europe/Moscow")
+	from := time.Date(2026, 11, 16, 0, 0, 0, 0, msk)
+	events, skipped := mustParse(t, appleFeed).Between(from, from.AddDate(0, 0, 7), msk)
+	if skipped != 0 || len(events) != 1 {
+		t.Fatalf("got %d events, %d skipped; want 1, 0", len(events), skipped)
+	}
+	e := events[0]
+	if want := "Ревью архитектуры с командой платформы и представителями смежных сервисов"; e.Title != want {
+		t.Errorf("folded title = %q", e.Title)
+	}
+	if want := "Невский проспект, 28\nСанкт-Петербург, Россия"; e.Location != want {
+		t.Errorf("location = %q", e.Location)
+	}
+	if want := time.Date(2026, 11, 17, 11, 0, 0, 0, msk); !e.Start.Equal(want) {
+		t.Errorf("start = %v", e.Start)
+	}
+}
+
 func TestParseURL(t *testing.T) {
 	tests := []struct {
 		in, want string

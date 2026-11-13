@@ -17,6 +17,8 @@ import (
 
 	"github.com/emersion/go-ical"
 	"github.com/teambition/rrule-go"
+
+	"github.com/mgrubiyan/startpage/internal/fetch"
 )
 
 // Event is one occurrence. All-day events start and end at midnight in the
@@ -93,6 +95,7 @@ func (f *Fetcher) Load(ctx context.Context, rawURL string) (*Calendar, error) {
 		return nil, fail(errors.New("bad URL"))
 	}
 	req.Header.Set("Accept", "text/calendar")
+	req.Header.Set("User-Agent", fetch.UserAgent)
 	resp, err := f.http.Do(req)
 	if err != nil {
 		// *url.Error prints the whole URL; keep only what went wrong.
