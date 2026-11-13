@@ -31,6 +31,9 @@ type Board struct {
 	// Delay is how far behind real time the exchange publishes this data for free.
 	Delay  time.Duration
 	Quotes []Quote
+	// Missing are the requested symbols this exchange didn't quote, in the
+	// order asked: a typo, or a coin only another exchange lists.
+	Missing []string
 }
 
 // Fetcher loads a Board.
@@ -75,12 +78,41 @@ type Coin struct {
 // pair is the coin's USDT market, named the same on Binance and Bybit.
 func (c Coin) pair() string { return c.Symbol + "USDT" }
 
-// DefaultCoins are the coins the page shows.
-var DefaultCoins = []Coin{
-	{"BTC", "Bitcoin"},
-	{"ETH", "Ethereum"},
-	{"SOL", "Solana"},
-	{"TON", "Toncoin"},
+// coinNames names the better-known coins; any other is shown by its symbol,
+// since the exchanges' ticker APIs carry no names.
+var coinNames = map[string]string{
+	"BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "TON": "Toncoin",
+	"BNB": "BNB", "XRP": "XRP", "DOGE": "Dogecoin", "ADA": "Cardano",
+	"TRX": "TRON", "LTC": "Litecoin", "DOT": "Polkadot", "AVAX": "Avalanche",
+	"LINK": "Chainlink", "XLM": "Stellar", "SUI": "Sui", "NOT": "Notcoin",
+}
+
+// Coins turns symbols, as the user listed them, into coins.
+func Coins(symbols []string) []Coin {
+	out := make([]Coin, len(symbols))
+	for i, s := range symbols {
+		name := coinNames[s]
+		if name == "" {
+			name = s
+		}
+		out[i] = Coin{Symbol: s, Name: name}
+	}
+	return out
+}
+
+// missing lists the symbols that got no quote, in the order they were asked.
+func missing(asked []string, quotes []Quote) []string {
+	got := make(map[string]bool, len(quotes))
+	for _, q := range quotes {
+		got[q.Symbol] = true
+	}
+	var out []string
+	for _, s := range asked {
+		if !got[s] {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // errNoQuotes means the exchange answered but quoted none of the requested instruments.

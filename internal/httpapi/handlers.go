@@ -3,9 +3,13 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/mgrubiyan/startpage/internal/store"
@@ -38,8 +42,65 @@ const UptimeWindow = 24 * time.Hour
 var searchEngines = map[string]bool{"g": true, "y": true, "d": true, "gh": true, "yt": true, "w": true}
 
 type settingsDTO struct {
+	SearchEngine string   `json:"searchEngine"`
+	City         string   `json:"city"`
+	Crypto       []string `json:"crypto"`
+	Shares       []string `json:"shares"`
+}
+
+func toSettingsDTO(s store.Settings) settingsDTO {
+	return settingsDTO{SearchEngine: s.SearchEngine, City: s.City, Crypto: orEmpty(s.Crypto), Shares: orEmpty(s.Shares)}
+}
+
+// orEmpty makes a missing list [] in JSON rather than null.
+func orEmpty(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+type settingsInput struct {
 	SearchEngine string `json:"searchEngine"`
 	City         string `json:"city"`
+	// A list left out keeps its stored value, so a page loaded before the
+	// lists existed can't clear them by saving the other settings.
+	Crypto *[]string `json:"crypto"`
+	Shares *[]string `json:"shares"`
+}
+
+// maxTickers matches the migration's CHECK: a row of the panel, not a terminal.
+const maxTickers = 8
+
+var (
+	coinSymbol  = regexp.MustCompile(`^[A-Z0-9]{2,10}$`)
+	shareTicker = regexp.MustCompile(`^[A-Z0-9]{1,12}$`) // MOEX has one-letter ones, like T
+)
+
+// cleanTickers upper-cases the list and drops blanks and repeats, keeping the
+// order the user gave. Whether the exchange knows a ticker is left to the board,
+// which lists the ones it couldn't quote.
+func cleanTickers(in []string, valid *regexp.Regexp) ([]string, error) {
+	out := make([]string, 0, len(in))
+	seen := make(map[string]bool, len(in))
+	for _, raw := range in {
+		t := strings.ToUpper(strings.TrimSpace(raw))
+		if t == "" || seen[t] {
+			continue
+		}
+		if !valid.MatchString(t) {
+			if r := []rune(t); len(r) > 12 {
+				t = string(r[:12]) + "…" // by runes: a Cyrillic "СБЕР" is no ticker either
+			}
+			return nil, fmt.Errorf("%q is not a ticker", t)
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	if len(out) > maxTickers {
+		return nil, fmt.Errorf("at most %d tickers", maxTickers)
+	}
+	return out, nil
 }
 
 type bookmarkDTO struct {
@@ -84,21 +145,29 @@ type slotDTO struct {
 	LatencyMs int64     `json:"latencyMs"` // average over successful checks; 0 if none
 }
 
-// HistorySlots hourly slots make up a service's history: one day.
-const HistorySlots = 24
+// A service's history is HistorySlots slots of historySlot each: one day by the hour.
+const (
+	HistorySlots = 24
+	historySlot  = time.Hour
+)
 
-// historySlots lays a service's non-empty buckets onto a dense row of hourly
-// slots ending with the hour now is in, so the page draws it as is.
-func historySlots(buckets []store.CheckBucket, now time.Time) []slotDTO {
-	first := now.UTC().Truncate(time.Hour).Add(-(HistorySlots - 1) * time.Hour)
+// historyStart is where the history row begins: the start of the slot now is
+// in, HistorySlots-1 slots back. Both the store query and the layout use it.
+func historyStart(now time.Time) time.Time {
+	return now.UTC().Truncate(historySlot).Add(-(HistorySlots - 1) * historySlot)
+}
+
+// historySlots lays a service's non-empty buckets onto a dense row of slots
+// from first, so the page draws it as is.
+func historySlots(buckets []store.CheckBucket, first time.Time) []slotDTO {
 	out := make([]slotDTO, HistorySlots)
 	for i := range out {
-		out[i].Start = first.Add(time.Duration(i) * time.Hour)
+		out[i].Start = first.Add(time.Duration(i) * historySlot)
 	}
 	for _, b := range buckets {
-		i := int(b.Start.Sub(first) / time.Hour)
+		i := int(b.Start.Sub(first) / historySlot)
 		if i < 0 || i >= HistorySlots || !b.Start.Equal(out[i].Start) {
-			continue // outside the window or not on the hour: not this row's slot
+			continue // outside the window or not on a slot boundary
 		}
 		out[i].Total, out[i].OK, out[i].LatencyMs = b.Total, b.OK, b.AvgLatency.Milliseconds()
 	}
@@ -145,11 +214,11 @@ func (a *api) getSettings(w http.ResponseWriter, r *http.Request) {
 		a.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, settingsDTO(s))
+	writeJSON(w, http.StatusOK, toSettingsDTO(s))
 }
 
 func (a *api) putSettings(w http.ResponseWriter, r *http.Request) {
-	var in settingsDTO
+	var in settingsInput
 	if err := decodeJSON(w, r, &in); err != nil {
 		badBody(w, err)
 		return
@@ -163,12 +232,33 @@ func (a *api) putSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "city: "+err.Error())
 		return
 	}
-	saved, err := a.store.UpdateSettings(r.Context(), store.Settings{SearchEngine: in.SearchEngine, City: city})
+	next := store.Settings{SearchEngine: in.SearchEngine, City: city}
+	if in.Crypto == nil || in.Shares == nil {
+		cur, err := a.store.Settings(r.Context())
+		if err != nil {
+			a.internalError(w, r, err)
+			return
+		}
+		next.Crypto, next.Shares = cur.Crypto, cur.Shares
+	}
+	if in.Crypto != nil {
+		if next.Crypto, err = cleanTickers(*in.Crypto, coinSymbol); err != nil {
+			writeError(w, http.StatusBadRequest, "crypto: "+err.Error())
+			return
+		}
+	}
+	if in.Shares != nil {
+		if next.Shares, err = cleanTickers(*in.Shares, shareTicker); err != nil {
+			writeError(w, http.StatusBadRequest, "shares: "+err.Error())
+			return
+		}
+	}
+	saved, err := a.store.UpdateSettings(r.Context(), next)
 	if err != nil {
 		a.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, settingsDTO(saved))
+	writeJSON(w, http.StatusOK, toSettingsDTO(saved))
 }
 
 // ---------- bookmarks ----------
@@ -222,22 +312,31 @@ func (a *api) deleteBookmark(w http.ResponseWriter, r *http.Request) {
 // ---------- services ----------
 
 func (a *api) listServices(w http.ResponseWriter, r *http.Request) {
-	statuses, err := a.store.ServiceStatuses(r.Context(), a.now().Add(-UptimeWindow))
+	// One instant for the whole response, so the uptime and the bars agree on the hour.
+	now := a.now()
+	first := historyStart(now)
+	var (
+		wg         sync.WaitGroup
+		history    map[int64][]store.CheckBucket
+		historyErr error
+	)
+	// The page polls this every 30s; the two queries needn't wait for each other.
+	wg.Go(func() { history, historyErr = a.store.CheckHistory(r.Context(), first, historySlot) })
+	statuses, err := a.store.ServiceStatuses(r.Context(), now.Add(-UptimeWindow))
+	wg.Wait()
 	if err != nil {
 		a.internalError(w, r, err)
 		return
 	}
-	now := a.now()
 	// The bars are a nice-to-have: without them the list still shows status and uptime.
-	history, err := a.store.CheckHistory(r.Context(), now.UTC().Truncate(time.Hour).Add(-(HistorySlots-1)*time.Hour), time.Hour)
-	if err != nil && r.Context().Err() == nil {
-		a.logger.WarnContext(r.Context(), "check history failed", "err", err)
+	if historyErr != nil && r.Context().Err() == nil {
+		a.logger.WarnContext(r.Context(), "check history failed", "err", historyErr)
 	}
 	out := make([]serviceDTO, 0, len(statuses))
 	for _, st := range statuses {
 		dto := serviceDTO{ID: st.ID, Name: st.Name, URL: st.URL, History: []slotDTO{}}
-		if err == nil {
-			dto.History = historySlots(history[st.ID], now)
+		if historyErr == nil {
+			dto.History = historySlots(history[st.ID], first)
 		}
 		if st.Last != nil {
 			dto.LastCheck = &checkDTO{

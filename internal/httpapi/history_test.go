@@ -70,7 +70,7 @@ func TestServicesWithoutHistory(t *testing.T) {
 func TestHistorySlotsAcrossZones(t *testing.T) {
 	// The server's zone doesn't move the slots: they are whole UTC hours.
 	now := time.Date(2026, 11, 10, 3, 40, 0, 0, time.FixedZone("", 5*60*60+30*60))
-	slots := historySlots(nil, now)
+	slots := historySlots(nil, historyStart(now))
 	if want := time.Date(2026, 11, 9, 22, 0, 0, 0, time.UTC); !slots[HistorySlots-1].Start.Equal(want) {
 		t.Fatalf("current slot starts %v, want %v", slots[HistorySlots-1].Start, want)
 	}

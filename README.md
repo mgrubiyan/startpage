@@ -24,10 +24,11 @@ are visible to Google.
   sunset and day length (Open-Meteo), and the CBR daily feed, cached server-side.
   Forecast days and sun times are in the city's own time zone, not the server's
   or the browser's.
-- **Markets**: BTC, ETH, SOL and TON from Binance, falling back to Bybit, and the
-  IMOEX index with blue chips from the Moscow Exchange (15 minutes delayed, as
-  its free data is). Each exchange is cached on its own, so one being down still
-  shows the other. Off on the public demo: MOEX requires a contract to display its
+- **Markets**: up to 8 coins of your choice (BTC, ETH, SOL and TON by default) from
+  Binance, falling back to Bybit, and the IMOEX index with up to 8 Moscow Exchange
+  shares (15 minutes delayed, as its free data is). The lists live in the settings;
+  a ticker an exchange doesn't know is named under its board instead of emptying
+  it. Each exchange is cached on its own, so one being down still shows the other. Off on the public demo: MOEX requires a contract to display its
   data to the public, and Binance has no policy that clearly allows it, while a
   personal instance behind a login is plain personal use.
 - **Painting of the day**: a public-domain (CC0) work from the Cleveland Museum of Art as the
@@ -201,7 +202,7 @@ are open and writes are refused). JSON in, JSON out.
 | `POST` | `/api/login` | `{"password": "..."}` → sets the session cookie (204) |
 | `POST` | `/api/logout` | deletes the session |
 | `GET` | `/api/meta` | `{"demo": false}`: how the server runs (public) |
-| `GET` / `PUT` | `/api/settings` | `{"searchEngine": "g", "city": "Санкт-Петербург"}` |
+| `GET` / `PUT` | `/api/settings` | `{"searchEngine": "g", "city": "Санкт-Петербург", "crypto": ["BTC", "ETH"], "shares": ["SBER"]}`; a list left out of a `PUT` is kept |
 | `GET` / `POST` | `/api/bookmarks` | list / add `{"title", "url"}` |
 | `DELETE` | `/api/bookmarks/{id}` | |
 | `GET` / `PUT` | `/api/note` | the scratchpad: `{"text"}` → `{"text", "updatedAt"}` |
@@ -213,7 +214,7 @@ are open and writes are refused). JSON in, JSON out.
 | `DELETE` | `/api/services/{id}` | |
 | `GET` | `/api/weather` | current weather and a five-day forecast (`days`, with sunrise/sunset) for the configured city |
 | `GET` | `/api/rates` | USD and EUR from the CBR, with previous values |
-| `GET` | `/api/markets` | crypto and MOEX boards, each with its source, delay and `stale`/`error`; `available: false` with a `reason` on the demo |
+| `GET` | `/api/markets` | crypto and MOEX boards for the settings' tickers, each with its source, delay, `stale`/`error` and the `missing` tickers; `available: false` with a `reason` on the demo |
 | `GET` | `/api/suggest?q=` | search suggestions |
 | `GET` | `/api/art` | today's painting: `{"title", "artist", "date", "url", "image"}` |
 | `GET` | `/api/art/image?v=` | the painting as JPEG (the one non-JSON response) |
@@ -277,6 +278,7 @@ make run-demo   # the same, in read-only demo mode
 make test               # unit tests with -race; Postgres tests skip
 make test-db            # once
 make test-integration   # everything, including Postgres
+make e2e                # the page in a real browser (Playwright, needs Node)
 make lint               # go vet + golangci-lint
 ```
 
@@ -286,8 +288,13 @@ make lint               # go vet + golangci-lint
   stale fallback, shutdown mid-round.
 - Postgres tests run against a real database. Each test gets its own schema, so they run in
   parallel.
+- Browser tests (`e2e/`, Playwright) start the real server against Postgres and check what
+  only a browser shows: logging in and out, a checked task staying under the cursor, the note
+  saving itself and staying locked until loaded, and a new tab opening from the last-known
+  data while the API is held back. Third-party widgets are left out: they'd make CI flaky.
 
-CI runs vet, the full suite with a Postgres service container, golangci-lint, and a Docker build.
+CI runs vet, the full suite with a Postgres service container, golangci-lint, a Docker build and
+the browser tests.
 On `main` it also publishes the image to GHCR, and deploys it when a server is configured.
 
 ## License

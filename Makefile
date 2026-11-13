@@ -3,7 +3,7 @@ TEST_DB_PORT      ?= 55432
 TEST_DATABASE_URL ?= postgres://postgres:test@127.0.0.1:$(TEST_DB_PORT)/postgres?sslmode=disable
 DEMO_DATABASE_URL ?= postgres://postgres:test@127.0.0.1:$(TEST_DB_PORT)/startpage_demo?sslmode=disable
 
-.PHONY: build run run-demo test test-db test-integration lint up down
+.PHONY: build run run-demo test test-db test-integration e2e lint up down
 
 build:
 	CGO_ENABLED=0 go build -trimpath -o bin/startpage ./cmd/startpage
@@ -31,6 +31,12 @@ test-db:
 ## test-integration: full suite including Postgres (make test-db first)
 test-integration:
 	TEST_DATABASE_URL='$(TEST_DATABASE_URL)' go test -race -count=1 ./...
+
+## e2e: the page in a real browser (make test-db first; installs Playwright's Chromium once)
+e2e:
+	docker exec $(TEST_DB_CONTAINER) psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'startpage_e2e'" | grep -q 1 \
+		|| docker exec $(TEST_DB_CONTAINER) createdb -U postgres startpage_e2e
+	cd e2e && npm ci && npx playwright install chromium && npx playwright test
 
 lint:
 	go vet ./...

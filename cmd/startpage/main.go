@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -127,18 +128,19 @@ func run() error {
 	// personal use, not for showing on a public site (see httpapi.getMarkets).
 	var cryptoBoard, stocksBoard httpapi.MarketSource
 	if !cfg.Demo {
-		crypto := markets.Fallback(
-			markets.WithTimeout(markets.NewBinance(upstream, markets.DefaultCoins).Board, 4*time.Second),
-			markets.WithTimeout(markets.NewBybit(upstream, markets.DefaultCoins).Board, 4*time.Second),
-		)
-		moex := markets.NewMOEX(upstream, markets.DefaultIndex, markets.DefaultShares)
-		cryptoBoard = cache.New(time.Minute, func(ctx context.Context, _ string) (markets.Board, error) {
-			return crypto(ctx)
-		}, cache.WithLoadTimeout(9*time.Second))
+		// The key is the ticker list from the settings, so changing it is
+		// simply another cache entry, and the old one ages out.
+		cryptoBoard = cache.New(time.Minute, func(ctx context.Context, key string) (markets.Board, error) {
+			coins := markets.Coins(tickers(key))
+			return markets.Fallback(
+				markets.WithTimeout(markets.NewBinance(upstream, coins).Board, 4*time.Second),
+				markets.WithTimeout(markets.NewBybit(upstream, coins).Board, 4*time.Second),
+			)(ctx)
+		}, cache.WithLoadTimeout(9*time.Second), cache.WithMaxEntries(4))
 		// MOEX's free data is 15 minutes late anyway; a few minutes more of cache costs nothing.
-		stocksBoard = cache.New(3*time.Minute, func(ctx context.Context, _ string) (markets.Board, error) {
-			return moex.Board(ctx)
-		}, cache.WithLoadTimeout(8*time.Second))
+		stocksBoard = cache.New(3*time.Minute, func(ctx context.Context, key string) (markets.Board, error) {
+			return markets.NewMOEX(upstream, markets.DefaultIndex, markets.Shares(tickers(key))).Board(ctx)
+		}, cache.WithLoadTimeout(8*time.Second), cache.WithMaxEntries(4))
 	}
 	artwork := art.NewDaily(art.New(&http.Client{Timeout: 30 * time.Second}).Pick)
 	go func() {
@@ -215,6 +217,14 @@ func run() error {
 }
 
 // localURL is the base URL of the local listener described by addr (STARTPAGE_ADDR).
+// tickers splits a markets cache key back into the list it was joined from.
+func tickers(key string) []string {
+	if key == "" {
+		return nil
+	}
+	return strings.Split(key, ",")
+}
+
 func localURL(addr string) (string, error) {
 	if addr == "" {
 		addr = ":8080"

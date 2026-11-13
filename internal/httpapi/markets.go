@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -10,8 +11,8 @@ import (
 	"github.com/mgrubiyan/startpage/internal/markets"
 )
 
-// MarketSource returns one exchange's board; the key is ignored.
-// *cache.Cache[markets.Board] implements it.
+// MarketSource returns one exchange's board for the comma-separated symbols
+// in key, as the user listed them. *cache.Cache[markets.Board] implements it.
 type MarketSource interface {
 	Get(ctx context.Context, key string) (cache.Result[markets.Board], error)
 }
@@ -37,6 +38,9 @@ type boardDTO struct {
 	Quotes       []quoteDTO `json:"quotes"`
 	FetchedAt    *time.Time `json:"fetchedAt,omitempty"`
 	Stale        bool       `json:"stale"`
+	// Missing are the symbols this exchange didn't quote: a typo, or a coin
+	// only the other exchange lists while it stands in.
+	Missing []string `json:"missing,omitempty"`
 	// Error is set instead of quotes when this exchange is unavailable;
 	// the other board is still served.
 	Error string `json:"error,omitempty"`
@@ -58,25 +62,39 @@ func (a *api) getMarkets(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, marketsDTO{Reason: "Котировки не настроены."})
 		return
 	}
+	s, err := a.store.Settings(r.Context())
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	// No coins listed means no crypto board; the shares board keeps the index.
+	cryptoSrc, stocksSrc := a.crypto, a.stocks
+	if len(s.Crypto) == 0 {
+		cryptoSrc = nil
+	}
 	// Both exchanges at once: a slow one shouldn't hold up the other.
 	var (
 		wg             sync.WaitGroup
 		crypto, stocks *boardDTO
 		failed         [2]bool
 	)
-	load := func(src MarketSource, name string, out **boardDTO, fail *bool) {
+	load := func(src MarketSource, name string, symbols []string, out **boardDTO, fail *bool) {
 		if src == nil {
 			return
 		}
-		wg.Go(func() { *out, *fail = a.board(r, src, name) })
+		wg.Go(func() { *out, *fail = a.board(r, src, name, strings.Join(symbols, ",")) })
 	}
-	load(a.crypto, "crypto", &crypto, &failed[0])
-	load(a.stocks, "stocks", &stocks, &failed[1])
+	load(cryptoSrc, "crypto", s.Crypto, &crypto, &failed[0])
+	load(stocksSrc, "stocks", s.Shares, &stocks, &failed[1])
 	wg.Wait()
 	if r.Context().Err() != nil {
 		return // client went away
 	}
-	if (a.crypto == nil || failed[0]) && (a.stocks == nil || failed[1]) {
+	if cryptoSrc == nil && stocksSrc == nil {
+		writeJSON(w, http.StatusOK, marketsDTO{Available: true})
+		return
+	}
+	if (cryptoSrc == nil || failed[0]) && (stocksSrc == nil || failed[1]) {
 		writeError(w, http.StatusBadGateway, "markets unavailable")
 		return
 	}
@@ -85,8 +103,8 @@ func (a *api) getMarkets(w http.ResponseWriter, r *http.Request) {
 
 // board loads one exchange. A failure is logged and reported in the board
 // itself, so the page can still show the other exchange.
-func (a *api) board(r *http.Request, src MarketSource, name string) (*boardDTO, bool) {
-	res, err := src.Get(r.Context(), "")
+func (a *api) board(r *http.Request, src MarketSource, name, symbols string) (*boardDTO, bool) {
+	res, err := src.Get(r.Context(), symbols)
 	if err != nil {
 		if r.Context().Err() == nil {
 			a.logger.WarnContext(r.Context(), "upstream failed", "upstream", "markets/"+name, "err", err)
@@ -100,6 +118,7 @@ func (a *api) board(r *http.Request, src MarketSource, name string) (*boardDTO, 
 		Quotes:       make([]quoteDTO, 0, len(b.Quotes)),
 		FetchedAt:    &res.FetchedAt,
 		Stale:        res.Stale,
+		Missing:      b.Missing,
 	}
 	for _, q := range b.Quotes {
 		dto := quoteDTO{Symbol: q.Symbol, Name: q.Name, Price: q.Price, Change: q.ChangePct, Currency: q.Currency}

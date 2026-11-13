@@ -1,0 +1,5 @@
+node_modules/
+# The session cookie the global setup saves for the tests.
+.auth/
+test-results/
+playwright-report/

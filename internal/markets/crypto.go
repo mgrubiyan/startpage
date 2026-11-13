@@ -35,7 +35,8 @@ type binanceTicker struct {
 }
 
 // Board fetches every coin in one request. Binance rejects the whole request
-// if any symbol is unknown, which is why the coin list is fixed in code.
+// with 400 if any symbol is unknown; the coins are user settings, so one typo
+// mustn't empty the board: the coins are then asked one by one.
 func (b *Binance) Board(ctx context.Context) (Board, error) {
 	pairs := make([]string, len(b.coins))
 	for i, c := range b.coins {
@@ -47,7 +48,11 @@ func (b *Binance) Board(ctx context.Context) (Board, error) {
 	}
 	q := url.Values{"symbols": {string(symbols)}, "type": {"MINI"}}
 	var tickers []binanceTicker
-	if err := fetch.JSON(ctx, b.http, b.url+"?"+q.Encode(), &tickers); err != nil {
+	err = fetch.JSON(ctx, b.http, b.url+"?"+q.Encode(), &tickers)
+	if se := (*fetch.StatusError)(nil); errors.As(err, &se) && se.Code == http.StatusBadRequest {
+		tickers, err = b.onePerPair(ctx, pairs)
+	}
+	if err != nil {
 		return Board{}, fmt.Errorf("binance: %w", err)
 	}
 	bySymbol := make(map[string]binanceTicker, len(tickers))
@@ -77,7 +82,42 @@ func (b *Binance) Board(ctx context.Context) (Board, error) {
 	if len(board.Quotes) == 0 {
 		return Board{}, fmt.Errorf("binance: %w", errNoQuotes)
 	}
+	board.Missing = missing(symbolsOf(b.coins), board.Quotes)
 	return board, nil
+}
+
+// onePerPair asks for each pair on its own, concurrently, and leaves out the
+// ones Binance answers 400 for: those it doesn't trade. Asked for one symbol,
+// it sends an object rather than a list.
+func (b *Binance) onePerPair(ctx context.Context, pairs []string) ([]binanceTicker, error) {
+	tickers := make([]binanceTicker, len(pairs))
+	errs := make([]error, len(pairs))
+	var wg sync.WaitGroup
+	for i, p := range pairs {
+		q := url.Values{"symbol": {p}, "type": {"MINI"}}
+		wg.Go(func() { errs[i] = fetch.JSON(ctx, b.http, b.url+"?"+q.Encode(), &tickers[i]) })
+	}
+	wg.Wait()
+	out := make([]binanceTicker, 0, len(pairs))
+	for i, err := range errs {
+		var se *fetch.StatusError
+		switch {
+		case errors.As(err, &se) && se.Code == http.StatusBadRequest:
+		case err != nil:
+			return nil, err
+		default:
+			out = append(out, tickers[i])
+		}
+	}
+	return out, nil
+}
+
+func symbolsOf(coins []Coin) []string {
+	out := make([]string, len(coins))
+	for i, c := range coins {
+		out[i] = c.Symbol
+	}
+	return out
 }
 
 // Bybit reads spot tickers from Bybit's public v5 API, one request per coin:
@@ -136,6 +176,7 @@ func (b *Bybit) Board(ctx context.Context) (Board, error) {
 	if len(board.Quotes) == 0 {
 		return Board{}, fmt.Errorf("bybit: %w", errNoQuotes)
 	}
+	board.Missing = missing(symbolsOf(b.coins), board.Quotes)
 	return board, nil
 }
 
