@@ -1,6 +1,7 @@
 package markets
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -20,16 +21,26 @@ type Security struct {
 	Name  string
 }
 
-// DefaultIndex and DefaultShares are what the page shows from MOEX.
-var (
-	DefaultIndex  = Security{"IMOEX", "Индекс МосБиржи"}
-	DefaultShares = []Security{
-		{"SBER", "Сбербанк"},
-		{"GAZP", "Газпром"},
-		{"LKOH", "Лукойл"},
-		{"YDEX", "Яндекс"},
+// DefaultIndex heads the shares board: the market as a whole.
+var DefaultIndex = Security{"IMOEX", "Индекс МосБиржи"}
+
+// shareNames are short Russian names for the bigger companies; any other share
+// takes the exchange's own short name (SHORTNAME).
+var shareNames = map[string]string{
+	"SBER": "Сбербанк", "SBERP": "Сбербанк, преф.", "GAZP": "Газпром", "LKOH": "Лукойл",
+	"YDEX": "Яндекс", "ROSN": "Роснефть", "NVTK": "Новатэк", "GMKN": "Норникель",
+	"TATN": "Татнефть", "VTBR": "ВТБ", "MTSS": "МТС", "MGNT": "Магнит",
+	"PLZL": "Полюс", "CHMF": "Северсталь", "AFLT": "Аэрофлот", "OZON": "Ozon", "T": "Т-Технологии",
+}
+
+// Shares turns tickers, as the user listed them, into securities.
+func Shares(tickers []string) []Security {
+	out := make([]Security, len(tickers))
+	for i, t := range tickers {
+		out[i] = Security{SecID: t, Name: shareNames[t]}
 	}
-)
+	return out
+}
 
 // MOEXDelay is how late the Moscow Exchange publishes share prices for free.
 const MOEXDelay = 15 * time.Minute
@@ -128,7 +139,11 @@ func (m *MOEX) Board(ctx context.Context) (Board, error) {
 	if len(quotes) == 0 {
 		return Board{}, fmt.Errorf("moex: %w", errNoQuotes)
 	}
-	return Board{Source: "Московская биржа", Delay: MOEXDelay, Quotes: quotes}, nil
+	ids := make([]string, len(m.shares))
+	for i, s := range m.shares {
+		ids[i] = s.SecID
+	}
+	return Board{Source: "Московская биржа", Delay: MOEXDelay, Quotes: quotes, Missing: missing(ids, shares)}, nil
 }
 
 func (m *MOEX) get(ctx context.Context, path string, q url.Values) (issResponse, error) {
@@ -162,6 +177,9 @@ func (m *MOEX) indexQuotes(ctx context.Context) ([]Quote, error) {
 }
 
 func (m *MOEX) shareQuotes(ctx context.Context) ([]Quote, error) {
+	if len(m.shares) == 0 {
+		return nil, nil // the index alone
+	}
 	ids := make([]string, len(m.shares))
 	for i, s := range m.shares {
 		ids[i] = s.SecID
@@ -169,17 +187,19 @@ func (m *MOEX) shareQuotes(ctx context.Context) ([]Quote, error) {
 	resp, err := m.get(ctx, "/shares/boards/TQBR/securities.json", url.Values{
 		"securities":         {strings.Join(ids, ",")},
 		"iss.only":           {"securities,marketdata"},
-		"securities.columns": {"SECID,PREVPRICE"},
+		"securities.columns": {"SECID,SHORTNAME,PREVPRICE"},
 		"marketdata.columns": {"SECID,LAST,LASTTOPREVPRICE,UPDATETIME,SYSTIME"},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("shares: %w", err)
 	}
 	prev := make(map[string]float64)
+	short := make(map[string]string)
 	for _, r := range resp.Securities.rows() {
 		if v, ok := r.num("PREVPRICE"); ok {
 			prev[r.str("SECID")] = v
 		}
+		short[r.str("SECID")] = r.str("SHORTNAME")
 	}
 	market := make(map[string]issRow)
 	for _, r := range resp.Marketdata.rows() {
@@ -191,7 +211,11 @@ func (m *MOEX) shareQuotes(ctx context.Context) ([]Quote, error) {
 		if !ok {
 			continue // unknown to ISS: it just leaves the row out
 		}
-		q := Quote{Symbol: s.SecID, Name: s.Name, Currency: "RUB"}
+		name := s.Name
+		if name == "" {
+			name = cmp.Or(short[s.SecID], s.SecID)
+		}
+		q := Quote{Symbol: s.SecID, Name: name, Currency: "RUB"}
 		if last, ok := r.num("LAST"); ok && last > 0 {
 			q.Price = last
 			q.ChangePct, _ = r.num("LASTTOPREVPRICE")

@@ -280,6 +280,13 @@ function marketBoard(title, b) {
     ul.append(li);
   });
   box.append(head, ul);
+  // Named by the exchange: with Binance down, Bybit stands in and lacks TON,
+  // which is no typo. Either way the fix is in the settings.
+  if (b.missing && b.missing.length) {
+    const miss = el('p', 'missing', `${b.source} не котирует: ${b.missing.join(', ')}`);
+    miss.title = 'Опечатка в тикере или бумага не торгуется на этой бирже. Список — в настройках.';
+    box.append(miss);
+  }
   return box;
 }
 
@@ -534,22 +541,36 @@ $('settings-toggle').addEventListener('click', (e) => {
   if (!form.hidden) {
     $('set-engine').value = state.settings.searchEngine;
     $('set-city').value = state.settings.city;
+    // Settings kept by an older page have no lists. Their fields stay hidden
+    // then, and the lists are left out of the save, so they aren't cleared.
+    const { crypto, shares } = state.settings;
+    $('set-crypto-label').hidden = !Array.isArray(crypto);
+    $('set-shares-label').hidden = !Array.isArray(shares);
+    $('set-crypto').value = (crypto || []).join(' ');
+    $('set-shares').value = (shares || []).join(' ');
     $('set-status').textContent = '';
   }
 });
+
+const tickerList = (s) => s.split(/[\s,;]+/).filter(Boolean);
 
 $('settings').addEventListener('submit', async (e) => {
   e.preventDefault();
   const status = $('set-status');
   try {
     const cityChanged = $('set-city').value.trim() !== state.settings.city;
-    state.settings = await api('/api/settings', {
-      method: 'PUT',
-      body: { searchEngine: $('set-engine').value, city: $('set-city').value },
-    });
+    const body = { searchEngine: $('set-engine').value, city: $('set-city').value };
+    if (!$('set-crypto-label').hidden) body.crypto = tickerList($('set-crypto').value);
+    if (!$('set-shares-label').hidden) body.shares = tickerList($('set-shares').value);
+    const before = JSON.stringify([state.settings.crypto, state.settings.shares]);
+    state.settings = await api('/api/settings', { method: 'PUT', body });
     remember('settings', state.settings);
     updateHint();
     if (cityChanged) loadWeather();
+    if (JSON.stringify([state.settings.crypto, state.settings.shares]) !== before) loadMarkets();
+    // Show the lists as the server cleaned them: upper case, no repeats.
+    $('set-crypto').value = (state.settings.crypto || []).join(' ');
+    $('set-shares').value = (state.settings.shares || []).join(' ');
     status.textContent = 'Сохранено';
   } catch (ex) {
     if (!ignorable(ex)) status.textContent = ex.message;

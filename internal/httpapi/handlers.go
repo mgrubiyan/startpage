@@ -3,9 +3,12 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,8 +42,65 @@ const UptimeWindow = 24 * time.Hour
 var searchEngines = map[string]bool{"g": true, "y": true, "d": true, "gh": true, "yt": true, "w": true}
 
 type settingsDTO struct {
+	SearchEngine string   `json:"searchEngine"`
+	City         string   `json:"city"`
+	Crypto       []string `json:"crypto"`
+	Shares       []string `json:"shares"`
+}
+
+func toSettingsDTO(s store.Settings) settingsDTO {
+	return settingsDTO{SearchEngine: s.SearchEngine, City: s.City, Crypto: orEmpty(s.Crypto), Shares: orEmpty(s.Shares)}
+}
+
+// orEmpty makes a missing list [] in JSON rather than null.
+func orEmpty(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+type settingsInput struct {
 	SearchEngine string `json:"searchEngine"`
 	City         string `json:"city"`
+	// A list left out keeps its stored value, so a page loaded before the
+	// lists existed can't clear them by saving the other settings.
+	Crypto *[]string `json:"crypto"`
+	Shares *[]string `json:"shares"`
+}
+
+// maxTickers matches the migration's CHECK: a row of the panel, not a terminal.
+const maxTickers = 8
+
+var (
+	coinSymbol  = regexp.MustCompile(`^[A-Z0-9]{2,10}$`)
+	shareTicker = regexp.MustCompile(`^[A-Z0-9]{1,12}$`) // MOEX has one-letter ones, like T
+)
+
+// cleanTickers upper-cases the list and drops blanks and repeats, keeping the
+// order the user gave. Whether the exchange knows a ticker is left to the board,
+// which lists the ones it couldn't quote.
+func cleanTickers(in []string, valid *regexp.Regexp) ([]string, error) {
+	out := make([]string, 0, len(in))
+	seen := make(map[string]bool, len(in))
+	for _, raw := range in {
+		t := strings.ToUpper(strings.TrimSpace(raw))
+		if t == "" || seen[t] {
+			continue
+		}
+		if !valid.MatchString(t) {
+			if r := []rune(t); len(r) > 12 {
+				t = string(r[:12]) + "…" // by runes: a Cyrillic "СБЕР" is no ticker either
+			}
+			return nil, fmt.Errorf("%q is not a ticker", t)
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	if len(out) > maxTickers {
+		return nil, fmt.Errorf("at most %d tickers", maxTickers)
+	}
+	return out, nil
 }
 
 type bookmarkDTO struct {
@@ -154,11 +214,11 @@ func (a *api) getSettings(w http.ResponseWriter, r *http.Request) {
 		a.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, settingsDTO(s))
+	writeJSON(w, http.StatusOK, toSettingsDTO(s))
 }
 
 func (a *api) putSettings(w http.ResponseWriter, r *http.Request) {
-	var in settingsDTO
+	var in settingsInput
 	if err := decodeJSON(w, r, &in); err != nil {
 		badBody(w, err)
 		return
@@ -172,12 +232,33 @@ func (a *api) putSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "city: "+err.Error())
 		return
 	}
-	saved, err := a.store.UpdateSettings(r.Context(), store.Settings{SearchEngine: in.SearchEngine, City: city})
+	next := store.Settings{SearchEngine: in.SearchEngine, City: city}
+	if in.Crypto == nil || in.Shares == nil {
+		cur, err := a.store.Settings(r.Context())
+		if err != nil {
+			a.internalError(w, r, err)
+			return
+		}
+		next.Crypto, next.Shares = cur.Crypto, cur.Shares
+	}
+	if in.Crypto != nil {
+		if next.Crypto, err = cleanTickers(*in.Crypto, coinSymbol); err != nil {
+			writeError(w, http.StatusBadRequest, "crypto: "+err.Error())
+			return
+		}
+	}
+	if in.Shares != nil {
+		if next.Shares, err = cleanTickers(*in.Shares, shareTicker); err != nil {
+			writeError(w, http.StatusBadRequest, "shares: "+err.Error())
+			return
+		}
+	}
+	saved, err := a.store.UpdateSettings(r.Context(), next)
 	if err != nil {
 		a.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, settingsDTO(saved))
+	writeJSON(w, http.StatusOK, toSettingsDTO(saved))
 }
 
 // ---------- bookmarks ----------

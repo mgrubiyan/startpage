@@ -14,6 +14,8 @@ var ErrNotFound = errors.New("not found")
 type Settings struct {
 	SearchEngine string
 	City         string
+	Crypto       []string // coin symbols for the markets panel, in display order
+	Shares       []string // MOEX share tickers, likewise
 }
 
 // Bookmark is a tile on the start page.

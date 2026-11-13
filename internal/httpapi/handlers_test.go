@@ -44,7 +44,10 @@ type fakeStore struct {
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
-		settings:  store.Settings{SearchEngine: "g", City: "Санкт-Петербург"},
+		settings: store.Settings{
+			SearchEngine: "g", City: "Санкт-Петербург",
+			Crypto: []string{"BTC", "ETH"}, Shares: []string{"SBER"},
+		},
 		bookmarks: []store.Bookmark{{ID: 1, Title: "GitHub", URL: "https://github.com"}},
 		nextID:    100,
 	}
