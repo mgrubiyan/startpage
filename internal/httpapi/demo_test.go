@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func TestDemoModeIsReadOnly(t *testing.T) {
 	if reads < 6 || writes < 7 {
 		t.Fatalf("route table changed shape: %d reads, %d writes", reads, writes)
 	}
-	if len(env.store.bookmarks) != 1 || env.store.settings != before ||
+	if len(env.store.bookmarks) != 1 || !reflect.DeepEqual(env.store.settings, before) ||
 		len(env.store.statuses) != 1 || env.servicesChange != 0 ||
 		len(env.store.tasks) != 1 || !env.store.tasks[0].Done || env.store.note.Text != "demo note" {
 		t.Fatalf("demo writes changed state: %d bookmarks, settings %+v, %d services, %d service changes",

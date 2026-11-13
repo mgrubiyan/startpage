@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -124,15 +125,25 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.SearchEngine != "g" || got.City != "Санкт-Петербург" {
+	want := store.Settings{
+		SearchEngine: "g", City: "Санкт-Петербург",
+		Crypto: []string{"BTC", "ETH", "SOL", "TON"}, Shares: []string{"SBER", "GAZP", "LKOH", "YDEX"},
+	}
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("defaults = %+v", got)
 	}
-	want := store.Settings{SearchEngine: "y", City: "Москва"}
-	if got, err = s.UpdateSettings(ctx, want); err != nil || got != want {
+	want = store.Settings{SearchEngine: "y", City: "Москва", Crypto: []string{"TON", "BTC"}, Shares: []string{"T"}}
+	if got, err = s.UpdateSettings(ctx, want); err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("UpdateSettings = %+v, %v", got, err)
 	}
-	if got, _ = s.Settings(ctx); got != want {
+	if got, _ = s.Settings(ctx); !reflect.DeepEqual(got, want) {
 		t.Fatalf("after update = %+v", got)
+	}
+	// An emptied list is an empty array: pgx would send a nil slice as NULL,
+	// which the NOT NULL column refuses.
+	if got, err = s.UpdateSettings(ctx, store.Settings{SearchEngine: "y", City: "Москва"}); err != nil ||
+		len(got.Crypto) != 0 || got.Crypto == nil || len(got.Shares) != 0 {
+		t.Fatalf("emptied lists = %+v, %v", got, err)
 	}
 }
 
