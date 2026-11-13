@@ -20,6 +20,47 @@ const el = (tag, cls, text) => {
 
 const state = { settings: { searchEngine: 'g', city: '' } };
 
+// ---------- last-known data ----------
+// Every new tab is this page, so it must open whole, not fill itself in block
+// by block and push the rest down. Each widget's last answer is kept and drawn
+// before any request; the fresh one replaces it only if it differs. The note is
+// left out on purpose: an old copy in the textarea could be saved over a newer
+// text. Logging out, or the session running out, forgets it all.
+const LAST = 'startpage.last.';
+const LAST_NAMES = ['meta', 'settings', 'weather', 'rates', 'markets', 'bookmarks', 'tasks', 'services'];
+const drawn = {}; // widget → JSON of what it shows now
+
+function recall(name) {
+  try { return JSON.parse(localStorage.getItem(LAST + name)); } catch { return null; }
+}
+
+function remember(name, data) {
+  try { localStorage.setItem(LAST + name, JSON.stringify(data)); } catch { /* not kept: the next tab loads as usual */ }
+}
+
+function forgetAll() {
+  LAST_NAMES.forEach((name) => {
+    delete drawn[name];
+    try { localStorage.removeItem(LAST + name); } catch { /* nothing kept */ }
+  });
+}
+
+// show draws a widget unless that exact data is on screen already: polls
+// mostly bring the same answer, and redrawing it would reset the hover, an
+// open tooltip and the favicons. A fresh answer is also kept for the next tab.
+function show(name, data, render, { keep = true } = {}) {
+  const key = JSON.stringify(data);
+  if (drawn[name] === key) return;
+  drawn[name] = key;
+  if (keep) {
+    try { localStorage.setItem(LAST + name, key); } catch { /* not kept */ }
+  }
+  render(data);
+}
+
+// After an error message replaced a widget, its next answer must be drawn.
+const undrawn = (name) => { delete drawn[name]; };
+
 // ---------- API ----------
 class AuthError extends Error {}
 
@@ -95,12 +136,16 @@ const stopTimers = () => { timers.forEach(clearInterval); timers = []; };
 function showLogin() {
   stopTimers();
   clearArt(); // the painting comes from a private route; the login screen stays plain
+  forgetAll(); // nor does the next person at this browser get the last page
   $('app').hidden = true;
   $('login').hidden = false;
   $('login-password').focus();
 }
 
 function showApp() {
+  // restore() may have shown it already, and a second focus() would pull the
+  // cursor out of whatever field the user went to in the meantime.
+  if (!$('app').hidden) return;
   $('login').hidden = true;
   $('app').hidden = false;
   $('q').focus();
@@ -137,15 +182,19 @@ function tick() {
 // ---------- weather ----------
 const fmtTemp = (t) => { const r = Math.round(t); return (r > 0 ? '+' : '') + r + '°'; };
 
+function renderWeather(w) {
+  $('weather-city').textContent = w.location;
+  $('weather-value').textContent = `${w.icon} ${fmtTemp(w.temperature)} · ${Math.round(w.windMs)} м/с`;
+  $('weather').title = `${w.description}, ощущается как ${fmtTemp(w.feelsLike)}` + (w.stale ? ' · данные устарели' : '');
+  renderForecast(w.days || [], w.stale);
+}
+
 async function loadWeather() {
   try {
-    const w = await api('/api/weather');
-    $('weather-city').textContent = w.location;
-    $('weather-value').textContent = `${w.icon} ${fmtTemp(w.temperature)} · ${Math.round(w.windMs)} м/с`;
-    $('weather').title = `${w.description}, ощущается как ${fmtTemp(w.feelsLike)}` + (w.stale ? ' · данные устарели' : '');
-    renderForecast(w.days || [], w.stale);
+    show('weather', await api('/api/weather'), renderWeather);
   } catch (e) {
     if (ignorable(e)) return;
+    undrawn('weather');
     $('weather-city').textContent = state.settings.city || 'Погода';
     $('weather-value').textContent = '—';
     $('weather').title = 'Погода недоступна: ' + e.message;
@@ -234,37 +283,46 @@ function marketBoard(title, b) {
   return box;
 }
 
+function renderMarkets(m) {
+  const root = $('markets');
+  root.textContent = '';
+  if (!m.available) { root.append(el('p', 'note-line', m.reason || 'Котировки недоступны')); return; }
+  if (m.crypto) root.append(marketBoard('Криптовалюты', m.crypto));
+  if (m.stocks) root.append(marketBoard('Акции', m.stocks));
+}
+
 async function loadMarkets() {
   const root = $('markets');
   try {
-    const m = await api('/api/markets');
-    root.textContent = '';
-    if (!m.available) { root.append(el('p', 'note-line', m.reason || 'Котировки недоступны')); return; }
-    if (m.crypto) root.append(marketBoard('Криптовалюты', m.crypto));
-    if (m.stocks) root.append(marketBoard('Акции', m.stocks));
+    show('markets', await api('/api/markets'), renderMarkets);
   } catch (e) {
     if (ignorable(e)) return;
+    undrawn('markets');
     root.textContent = '';
     root.append(el('p', 'note-line', 'Биржи недоступны: ' + e.message));
   }
 }
 
 // ---------- rates ----------
-async function loadRates() {
+function renderRates(r) {
   const box = $('rates-value');
+  box.textContent = '';
+  [['$', r.usd], ['€', r.eur]].forEach(([sym, v], i) => {
+    if (i) box.append(' ');
+    box.append(`${sym} ${v.value.toFixed(2)}`);
+    const diff = v.value - v.previous;
+    if (Math.abs(diff) >= 0.005) box.append(el('span', diff > 0 ? 'up' : 'down', diff > 0 ? '▲' : '▼'));
+  });
+  $('rates').title = 'Курс ЦБ РФ на ' + new Date(r.date).toLocaleDateString('ru-RU') + (r.stale ? ' · данные устарели' : '');
+}
+
+async function loadRates() {
   try {
-    const r = await api('/api/rates');
-    box.textContent = '';
-    [['$', r.usd], ['€', r.eur]].forEach(([sym, v], i) => {
-      if (i) box.append(' ');
-      box.append(`${sym} ${v.value.toFixed(2)}`);
-      const diff = v.value - v.previous;
-      if (Math.abs(diff) >= 0.005) box.append(el('span', diff > 0 ? 'up' : 'down', diff > 0 ? '▲' : '▼'));
-    });
-    $('rates').title = 'Курс ЦБ РФ на ' + new Date(r.date).toLocaleDateString('ru-RU') + (r.stale ? ' · данные устарели' : '');
+    show('rates', await api('/api/rates'), renderRates);
   } catch (e) {
     if (ignorable(e)) return;
-    box.textContent = '—';
+    undrawn('rates');
+    $('rates-value').textContent = '—';
     $('rates').title = 'Курсы недоступны: ' + e.message;
   }
 }
@@ -305,15 +363,19 @@ function bookmarkTile(bm) {
   return li;
 }
 
+function renderBookmarks(items) {
+  const ul = $('bookmarks');
+  ul.textContent = '';
+  items.forEach((bm) => {
+    const tile = bookmarkTile(bm);
+    if (tile) ul.append(tile);
+  });
+}
+
 async function loadBookmarks() {
   try {
-    const items = await api('/api/bookmarks');
-    const ul = $('bookmarks');
-    ul.textContent = '';
-    items.forEach((bm) => {
-      const tile = bookmarkTile(bm);
-      if (tile) ul.append(tile);
-    });
+    show('bookmarks', await api('/api/bookmarks'), renderBookmarks);
+    $('bm-error').textContent = '';
   } catch (e) {
     if (!ignorable(e)) $('bm-error').textContent = 'Закладки не загрузились: ' + e.message;
   }
@@ -350,28 +412,30 @@ $('add-bookmark').addEventListener('submit', async (e) => {
 });
 
 // ---------- services ----------
+// The demo's own health check answers in under a millisecond; "0 мс" would read as broken.
+const fmtMs = (ms) => (ms < 1 ? '<1 мс' : `${ms} мс`);
+const fmtPct = (p) => p.toFixed(Number.isInteger(p) ? 0 : 1);
+
 function serviceMeta(s) {
   const c = s.lastCheck;
   if (!c) return 'ещё не проверялся';
-  const latency = c.latencyMs < 1 ? '<1 мс' : `${c.latencyMs} мс`;
+  const latency = fmtMs(c.latencyMs);
   const head = c.ok ? latency : (c.statusCode ? `HTTP ${c.statusCode}` : 'недоступен');
   if (s.uptime == null) return head;
-  return `${head} · ${s.uptime.toFixed(Number.isInteger(s.uptime) ? 0 : 1)}% за сутки`;
+  return `${head} · ${fmtPct(s.uptime)}% за сутки`;
 }
 
 const hhmm = (d) => d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
 // A day of hourly slots, oldest first, like a status page: green when every
 // check passed, amber when some failed, red when none passed, grey when unchecked.
-function historyBars(history) {
+function historyBars(history, uptime) {
   const row = el('div', 'bars');
   row.setAttribute('role', 'img');
-  const checked = history.filter((h) => h.total > 0);
-  const ok = checked.reduce((n, h) => n + h.ok, 0);
-  const total = checked.reduce((n, h) => n + h.total, 0);
-  row.setAttribute('aria-label', total
-    ? `За сутки: ${Math.round((ok / total) * 1000) / 10}% успешных проверок`
-    : 'За сутки проверок не было');
+  // The same daily figure the row shows, not one recomputed over whole hours.
+  row.setAttribute('aria-label', uptime != null
+    ? `Аптайм по часам за сутки, всего ${fmtPct(uptime)}%`
+    : 'Аптайм по часам за сутки: проверок не было');
   history.forEach((h) => {
     const start = new Date(h.start);
     const end = new Date(start.getTime() + 60 * 60 * 1000);
@@ -382,49 +446,56 @@ function historyBars(history) {
       bar.title = `${span} · не проверялся`;
     } else {
       const pct = Math.round((h.ok / h.total) * 1000) / 10;
-      bar.title = `${span} · ${pct}% (${h.ok} из ${h.total})` + (h.ok ? ` · ${h.latencyMs} мс` : '');
+      bar.title = `${span} · ${pct}% (${h.ok} из ${h.total})` + (h.ok ? ` · ${fmtMs(h.latencyMs)}` : '');
     }
     row.append(bar);
   });
   return row;
 }
 
+function renderServices(items) {
+  const ul = $('services');
+  ul.textContent = '';
+  if (!items.length) {
+    ul.append(el('li', 'empty', 'Пока пусто. Нажми «Изменить» и добавь адрес /health бота.'));
+    return;
+  }
+  items.forEach((s) => {
+    const li = el('li');
+    const status = s.lastCheck ? (s.lastCheck.ok ? 'ok' : 'fail') : '';
+    li.append(el('span', 'dot ' + status), el('span', 'name', s.name), el('span', 'meta', serviceMeta(s)));
+    if (s.lastCheck) {
+      const at = new Date(s.lastCheck.checkedAt).toLocaleTimeString('ru-RU');
+      li.title = `${s.url}\nпроверен в ${at}` + (s.lastCheck.error ? `\n${s.lastCheck.error}` : '');
+    } else {
+      li.title = s.url;
+    }
+    const rm = el('button', 'remove-inline', '×');
+    rm.type = 'button';
+    rm.title = 'Удалить';
+    rm.addEventListener('click', async () => {
+      try {
+        await api(`/api/services/${s.id}`, { method: 'DELETE' });
+        loadServices();
+      } catch (e) {
+        if (!ignorable(e)) $('svc-error').textContent = e.message;
+      }
+    });
+    li.append(rm);
+    if (s.history && s.history.length) li.append(historyBars(s.history, s.uptime));
+    ul.append(li);
+  });
+}
+
 async function loadServices() {
   try {
-    const items = await api('/api/services');
-    const ul = $('services');
-    ul.textContent = '';
-    if (!items.length) {
-      ul.append(el('li', 'empty', 'Пока пусто. Нажми «Изменить» и добавь адрес /health бота.'));
-      return;
-    }
-    items.forEach((s) => {
-      const li = el('li');
-      const status = s.lastCheck ? (s.lastCheck.ok ? 'ok' : 'fail') : '';
-      li.append(el('span', 'dot ' + status), el('span', 'name', s.name), el('span', 'meta', serviceMeta(s)));
-      if (s.lastCheck) {
-        const at = new Date(s.lastCheck.checkedAt).toLocaleTimeString('ru-RU');
-        li.title = `${s.url}\nпроверен в ${at}` + (s.lastCheck.error ? `\n${s.lastCheck.error}` : '');
-      } else {
-        li.title = s.url;
-      }
-      const rm = el('button', 'remove-inline', '×');
-      rm.type = 'button';
-      rm.title = 'Удалить';
-      rm.addEventListener('click', async () => {
-        try {
-          await api(`/api/services/${s.id}`, { method: 'DELETE' });
-          loadServices();
-        } catch (e) {
-          if (!ignorable(e)) $('svc-error').textContent = e.message;
-        }
-      });
-      li.append(rm);
-      if (s.history && s.history.length) li.append(historyBars(s.history));
-      ul.append(li);
-    });
+    // Polled every 30s while the monitor checks about once a minute, so most
+    // answers are the same one: show() skips those.
+    show('services', await api('/api/services'), renderServices);
   } catch (e) {
-    if (!ignorable(e)) $('services').textContent = 'Статусы не загрузились: ' + e.message;
+    if (ignorable(e)) return;
+    undrawn('services'); // the message replaced the list: draw it again next time
+    $('services').textContent = 'Статусы не загрузились: ' + e.message;
   }
 }
 
@@ -476,6 +547,7 @@ $('settings').addEventListener('submit', async (e) => {
       method: 'PUT',
       body: { searchEngine: $('set-engine').value, city: $('set-city').value },
     });
+    remember('settings', state.settings);
     updateHint();
     if (cityChanged) loadWeather();
     status.textContent = 'Сохранено';
@@ -579,6 +651,38 @@ $('search').addEventListener('submit', (e) => {
 // ---------- tasks ----------
 const isDemo = () => document.body.classList.contains('demo');
 
+let tasks = [];       // as listed on screen
+let tasksSorted = []; // as the server lists them now
+
+// moveTask puts a task that changed where the server now lists it: open tasks
+// oldest first, then done ones, the one done last at the top.
+function moveTask(list, saved) {
+  const rest = list.filter((t) => t.id !== saved.id);
+  const open = rest.filter((t) => !t.done);
+  const done = rest.filter((t) => t.done);
+  return saved.done
+    ? [...open, saved, ...done]
+    : [...[...open, saved].sort((a, b) => a.id - b.id), ...done];
+}
+
+function updateTasksClear() {
+  const done = tasks.filter((t) => t.done).length;
+  $('tasks-clear').hidden = done === 0;
+  $('tasks-clear').textContent = `Убрать выполненные (${done})`;
+}
+
+// A checked task stays where it is, under the cursor, just crossed out: moving
+// it to the done ones at once would make the list jump on every click. The list
+// takes the server's order on its next load, e.g. when the tab is shown again.
+function taskDone(li, saved) {
+  li.classList.toggle('done', saved.done);
+  tasks = tasks.map((t) => (t.id === saved.id ? saved : t));
+  drawn.tasks = JSON.stringify(tasks); // so the next load, sorted, differs and is drawn
+  tasksSorted = moveTask(tasksSorted, saved);
+  remember('tasks', tasksSorted); // a new tab opens in the server's order straight away
+  updateTasksClear();
+}
+
 function taskItem(t) {
   const li = el('li', t.done ? 'done' : '');
   const label = el('label');
@@ -589,9 +693,11 @@ function taskItem(t) {
   box.addEventListener('change', async () => {
     box.disabled = true;
     try {
-      await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { done: box.checked } });
+      const saved = await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { done: box.checked } });
       $('tasks-error').textContent = '';
-      loadTasks();
+      box.checked = saved.done;
+      box.disabled = false;
+      taskDone(li, saved);
     } catch (e) {
       box.checked = !box.checked;
       box.disabled = false;
@@ -615,16 +721,19 @@ function taskItem(t) {
   return li;
 }
 
+function renderTasks(list) {
+  tasks = list;
+  tasksSorted = list; // both the server and the kept copy send them sorted
+  const ul = $('tasks');
+  ul.textContent = '';
+  if (!list.length) ul.append(el('li', 'empty', 'Задач нет'));
+  list.forEach((t) => ul.append(taskItem(t)));
+  updateTasksClear();
+}
+
 async function loadTasks() {
   try {
-    const list = await api('/api/tasks');
-    const ul = $('tasks');
-    ul.textContent = '';
-    if (!list.length) ul.append(el('li', 'empty', 'Задач нет'));
-    list.forEach((t) => ul.append(taskItem(t)));
-    const done = list.filter((t) => t.done).length;
-    $('tasks-clear').hidden = done === 0;
-    $('tasks-clear').textContent = `Убрать выполненные (${done})`;
+    show('tasks', await api('/api/tasks'), renderTasks);
   } catch (e) {
     if (!ignorable(e)) $('tasks-error').textContent = 'Задачи не загрузились: ' + e.message;
   }
@@ -666,7 +775,11 @@ $('tasks-clear').addEventListener('click', async () => {
 // - text from the server never replaces the textarea while there are edits it
 //   hasn't seen, which would also move the cursor.
 const noteEl = $('note');
-const note = { edits: 0, savedEdits: 0, inFlight: false, again: false, timer: 0 };
+const note = { edits: 0, savedEdits: 0, inFlight: false, again: false, timer: 0, loaded: false };
+// Read-only until the server's text is in: the rest of the page opens from the
+// kept copy at once, and typing into the still empty field would save that
+// empty draft over the real note.
+noteEl.readOnly = true;
 
 function fmtSaved(iso) {
   const d = new Date(iso);
@@ -685,6 +798,8 @@ async function loadNote() {
     const n = await api('/api/note');
     if (note.edits !== before || noteDirty()) return; // typed meanwhile: keep the local text
     if (noteEl.value !== n.text) noteEl.value = n.text;
+    note.loaded = true;
+    noteEl.readOnly = isDemo();
     noteStatus(n.text ? 'сохранено ' + fmtSaved(n.updatedAt) : '');
   } catch (e) {
     if (!ignorable(e)) noteStatus('не загрузилась: ' + e.message);
@@ -697,7 +812,9 @@ async function saveNote({ keepalive = false } = {}) {
   if (note.edits === note.savedEdits) return;
   const edits = note.edits;
   note.inFlight = true;
-  noteStatus('сохраняю…');
+  // A save takes some tens of milliseconds: saying so would only flash a word.
+  // Only a slow one gets a status, so the user knows it is still going.
+  const slow = setTimeout(() => noteStatus('сохраняю…'), 400);
   let ok = false;
   try {
     const saved = await api('/api/note', { method: 'PUT', body: { text: noteEl.value }, keepalive });
@@ -711,6 +828,7 @@ async function saveNote({ keepalive = false } = {}) {
       note.timer = setTimeout(saveNote, 5000);
     }
   } finally {
+    clearTimeout(slow);
     note.inFlight = false;
   }
   const again = note.again;
@@ -797,19 +915,55 @@ function clearArt() {
 
 // ---------- boot ----------
 // Demo mode hides edit controls; the server refuses writes either way.
+function applyMeta(meta) {
+  document.body.classList.toggle('demo', meta.demo);
+  $('demo-banner').hidden = !meta.demo;
+  noteEl.readOnly = meta.demo || !note.loaded;
+}
+
 async function loadMeta() {
   try {
     const meta = await api('/api/meta');
-    document.body.classList.toggle('demo', meta.demo);
-    $('demo-banner').hidden = !meta.demo;
-    noteEl.readOnly = meta.demo;
+    applyMeta(meta);
+    remember('meta', meta);
   } catch { /* unknown mode: show the normal UI; a demo server still refuses writes */ }
+}
+
+// restore draws the last page this browser saw, before any request, so a new
+// tab opens whole and boot() then only corrects what changed. Settings are kept
+// only once they were loaded with a valid session, so a browser that never
+// logged in, or logged out, gets the login screen as before.
+const WIDGETS = {
+  weather: renderWeather, rates: renderRates, markets: renderMarkets,
+  bookmarks: renderBookmarks, tasks: renderTasks, services: renderServices,
+};
+
+function restore() {
+  const settings = recall('settings');
+  if (!settings) return;
+  state.settings = settings;
+  const meta = recall('meta');
+  if (meta) applyMeta(meta);
+  Object.entries(WIDGETS).forEach(([name, render]) => {
+    const data = recall(name);
+    if (data == null) return;
+    try {
+      show(name, data, render, { keep: false });
+    } catch {
+      // Kept by an older version of the page in another shape: let boot() draw it.
+      undrawn(name);
+      try { localStorage.removeItem(LAST + name); } catch { /* nothing kept */ }
+    }
+  });
+  showApp();
+  updateHint();
 }
 
 async function boot() {
   await loadMeta();
   try {
     state.settings = await api('/api/settings');
+    remember('settings', state.settings);
   } catch (e) {
     if (e instanceof AuthError) return;
     // The API failed but the page itself loaded: show it with defaults.
@@ -836,4 +990,5 @@ async function boot() {
 tick();
 setInterval(tick, 1000);
 restoreArt(); // before boot's API calls, so the first paint already has the painting
+restore();
 boot();
