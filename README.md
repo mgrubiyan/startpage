@@ -278,6 +278,7 @@ make run-demo   # the same, in read-only demo mode
 make test               # unit tests with -race; Postgres tests skip
 make test-db            # once
 make test-integration   # everything, including Postgres
+make e2e                # the page in a real browser (Playwright, needs Node)
 make lint               # go vet + golangci-lint
 ```
 
@@ -287,8 +288,13 @@ make lint               # go vet + golangci-lint
   stale fallback, shutdown mid-round.
 - Postgres tests run against a real database. Each test gets its own schema, so they run in
   parallel.
+- Browser tests (`e2e/`, Playwright) start the real server against Postgres and check what
+  only a browser shows: logging in and out, a checked task staying under the cursor, the note
+  saving itself and staying locked until loaded, and a new tab opening from the last-known
+  data while the API is held back. Third-party widgets are left out: they'd make CI flaky.
 
-CI runs vet, the full suite with a Postgres service container, golangci-lint, and a Docker build.
+CI runs vet, the full suite with a Postgres service container, golangci-lint, a Docker build and
+the browser tests.
 On `main` it also publishes the image to GHCR, and deploys it when a server is configured.
 
 ## License
