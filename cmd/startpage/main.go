@@ -17,6 +17,7 @@ import (
 	"github.com/mgrubiyan/startpage/internal/art"
 	"github.com/mgrubiyan/startpage/internal/auth"
 	"github.com/mgrubiyan/startpage/internal/cache"
+	"github.com/mgrubiyan/startpage/internal/calendar"
 	"github.com/mgrubiyan/startpage/internal/config"
 	"github.com/mgrubiyan/startpage/internal/demo"
 	"github.com/mgrubiyan/startpage/internal/fetch"
@@ -142,6 +143,14 @@ func run() error {
 			return markets.NewMOEX(upstream, markets.DefaultIndex, markets.Shares(tickers(key))).Board(ctx)
 		}, cache.WithLoadTimeout(8*time.Second), cache.WithMaxEntries(4))
 	}
+	// Keyed by feed URL. Parsed feeds are kept, and each request expands them
+	// for the viewer's time zone, so the zone isn't part of the key.
+	var calendars httpapi.CalendarSource
+	if !cfg.Demo {
+		feeds := calendar.NewFetcher(calendar.NewClient())
+		calendars = cache.New(10*time.Minute, feeds.Load,
+			cache.WithLoadTimeout(15*time.Second), cache.WithMaxEntries(8))
+	}
 	artwork := art.NewDaily(art.New(&http.Client{Timeout: 30 * time.Second}).Pick)
 	go func() {
 		// Load ahead of visitors, at startup and soon after each UTC midnight,
@@ -173,6 +182,7 @@ func run() error {
 		Art:               artwork,
 		Crypto:            cryptoBoard,
 		Stocks:            stocksBoard,
+		Calendar:          calendars,
 		Auth:              authService,
 		LoginLimiter:      auth.NewLimiter(5, time.Minute),
 		SecureCookie:      cfg.SecureCookie,

@@ -3,7 +3,9 @@ module github.com/mgrubiyan/startpage
 go 1.25.0
 
 require (
+	github.com/emersion/go-ical v0.0.0-20261112170022-46c5b53a1723
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/teambition/rrule-go v1.8.2
 	golang.org/x/crypto v0.55.0
 	golang.org/x/sync v0.22.0
 )

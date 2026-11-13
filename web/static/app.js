@@ -27,7 +27,7 @@ const state = { settings: { searchEngine: 'g', city: '' } };
 // left out on purpose: an old copy in the textarea could be saved over a newer
 // text. Logging out, or the session running out, forgets it all.
 const LAST = 'startpage.last.';
-const LAST_NAMES = ['meta', 'settings', 'weather', 'rates', 'markets', 'bookmarks', 'tasks', 'services'];
+const LAST_NAMES = ['meta', 'settings', 'weather', 'rates', 'markets', 'calendar', 'bookmarks', 'tasks', 'services'];
 const drawn = {}; // widget → JSON of what it shows now
 
 function recall(name) {
@@ -310,6 +310,98 @@ async function loadMarkets() {
   }
 }
 
+// ---------- calendar ----------
+// The browser's zone: the server cuts the days in it and puts all-day and
+// floating events into it, since it runs in a different zone than its user.
+const TZ = (() => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; }
+})();
+
+const pad2 = (n) => String(n).padStart(2, '0');
+const isoDay = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+// A "YYYY-MM-DD" date at local midnight; new Date(iso) would be UTC midnight.
+const localDay = (iso) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d); };
+const shortDay = (d) => d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+
+function agendaLabel(day, from) {
+  // Rounded: a day with a DST change is 23 or 25 hours long.
+  const n = Math.round((localDay(day) - localDay(from)) / 864e5);
+  if (n === 0) return 'Сегодня';
+  if (n === 1) return 'Завтра';
+  const s = localDay(day).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function agendaItem(e, day) {
+  const li = el('li', e.allDay ? 'all-day' : null);
+  const what = el('span', 'what', e.title);
+  const tip = [e.title];
+  if (e.allDay) {
+    const last = localDay(e.end);
+    last.setDate(last.getDate() - 1); // the end date is exclusive
+    if (isoDay(last) > day) what.append(el('span', 'where', 'до ' + shortDay(last)));
+    tip.push(isoDay(last) > e.start ? `${shortDay(localDay(e.start))} – ${shortDay(last)}` : 'весь день');
+  } else {
+    const start = new Date(e.start);
+    const end = new Date(e.end);
+    const otherDay = (d) => (isoDay(d) !== day ? shortDay(d) + ' ' : '');
+    // Begun on an earlier day: what's left of it is today's.
+    const begun = isoDay(start) < day;
+    li.append(el('span', 'when', begun ? '…' : hhmm(start)));
+    if (begun) what.append(el('span', 'where', 'до ' + otherDay(end) + hhmm(end)));
+    tip.push(`${otherDay(start)}${hhmm(start)} – ${otherDay(end)}${hhmm(end)}`);
+  }
+  if (e.location) {
+    what.append(el('span', 'where', e.location));
+    tip.push(e.location);
+  }
+  li.append(what);
+  li.title = tip.join('\n');
+  return li;
+}
+
+function renderCalendar(c) {
+  $('calendar-board').hidden = !c.configured;
+  const root = $('calendar');
+  root.textContent = '';
+  root.classList.toggle('stale', !!c.stale);
+  if (!c.configured) return;
+  // Events come sorted, so the days do too. One still running is today's.
+  const days = new Map();
+  c.events.forEach((e) => {
+    let day = e.allDay ? e.start : isoDay(new Date(e.start));
+    if (day < c.from) day = c.from;
+    if (!days.has(day)) days.set(day, []);
+    days.get(day).push(e);
+  });
+  days.forEach((events, day) => {
+    const card = el('section', 'agenda-day');
+    const ul = el('ul');
+    events.forEach((e) => ul.append(agendaItem(e, day)));
+    card.append(el('h3', null, agendaLabel(day, c.from)), ul);
+    root.append(card);
+  });
+  const notes = [];
+  if (!c.events.length) notes.push('На неделю ничего не запланировано');
+  if (c.failed) notes.push(c.failed === 1 ? 'Один из календарей не загрузился' : `Не загрузились календари: ${c.failed}`);
+  if (c.skipped) notes.push(`Не удалось прочитать событий: ${c.skipped}`);
+  if (notes.length) root.append(el('p', 'note-line', notes.join(' · ')));
+}
+
+async function loadCalendar() {
+  try {
+    show('calendar', await api('/api/calendar?tz=' + encodeURIComponent(TZ)), renderCalendar);
+  } catch (e) {
+    if (ignorable(e)) return;
+    undrawn('calendar');
+    // Only a saved link can fail to load; without one the panel stays away.
+    $('calendar-board').hidden = !(state.settings.calendars > 0);
+    const root = $('calendar');
+    root.textContent = '';
+    root.append(el('p', 'note-line', 'Календарь не загрузился: ' + e.message));
+  }
+}
+
 // ---------- rates ----------
 function renderRates(r) {
   const box = $('rates-value');
@@ -548,7 +640,36 @@ $('settings-toggle').addEventListener('click', (e) => {
     $('set-shares-label').hidden = !Array.isArray(shares);
     $('set-crypto').value = (crypto || []).join(' ');
     $('set-shares').value = (shares || []).join(' ');
+    $('set-calendars-label').hidden = typeof state.settings.calendars !== 'number';
+    $('set-calendars').value = '';
+    calendarsHint();
     $('set-status').textContent = '';
+  }
+});
+
+// Saved links never come back from the server, so the form says how many
+// there are, or how to get one.
+function calendarsHint() {
+  const n = state.settings.calendars;
+  const hint = $('set-calendars-hint');
+  hint.hidden = typeof n !== 'number';
+  $('set-calendars-off').hidden = !(n > 0);
+  hint.textContent = n > 0
+    ? `Подключено: ${n}. Сохранённые ссылки не показываются: это доступ к календарю. Чтобы заменить, вставьте их заново.`
+    : 'На iPhone: Календарь → Календари → ⓘ у календаря → «Публичный календарь» → «Поделиться ссылкой». Кто знает ссылку, видит этот календарь.';
+}
+
+$('set-calendars-off').addEventListener('click', async () => {
+  const status = $('set-status');
+  try {
+    const { searchEngine, city } = state.settings;
+    state.settings = await api('/api/settings', { method: 'PUT', body: { searchEngine, city, calendars: [] } });
+    remember('settings', state.settings);
+    calendarsHint();
+    loadCalendar();
+    status.textContent = 'Календари отключены';
+  } catch (ex) {
+    if (!ignorable(ex)) status.textContent = ex.message;
   }
 });
 
@@ -562,6 +683,9 @@ $('settings').addEventListener('submit', async (e) => {
     const body = { searchEngine: $('set-engine').value, city: $('set-city').value };
     if (!$('set-crypto-label').hidden) body.crypto = tickerList($('set-crypto').value);
     if (!$('set-shares-label').hidden) body.shares = tickerList($('set-shares').value);
+    // Left out when empty, which keeps the saved links.
+    const links = $('set-calendars').value.split(/\s+/).filter(Boolean);
+    if (!$('set-calendars-label').hidden && links.length) body.calendars = links;
     const before = JSON.stringify([state.settings.crypto, state.settings.shares]);
     state.settings = await api('/api/settings', { method: 'PUT', body });
     remember('settings', state.settings);
@@ -571,6 +695,11 @@ $('settings').addEventListener('submit', async (e) => {
     // Show the lists as the server cleaned them: upper case, no repeats.
     $('set-crypto').value = (state.settings.crypto || []).join(' ');
     $('set-shares').value = (state.settings.shares || []).join(' ');
+    if (body.calendars) {
+      $('set-calendars').value = '';
+      loadCalendar();
+    }
+    calendarsHint();
     status.textContent = 'Сохранено';
   } catch (ex) {
     if (!ignorable(ex)) status.textContent = ex.message;
@@ -955,7 +1084,7 @@ async function loadMeta() {
 // only once they were loaded with a valid session, so a browser that never
 // logged in, or logged out, gets the login screen as before.
 const WIDGETS = {
-  weather: renderWeather, rates: renderRates, markets: renderMarkets,
+  weather: renderWeather, rates: renderRates, markets: renderMarkets, calendar: renderCalendar,
   bookmarks: renderBookmarks, tasks: renderTasks, services: renderServices,
 };
 
@@ -994,6 +1123,7 @@ async function boot() {
   loadWeather();
   loadRates();
   loadMarkets();
+  loadCalendar();
   loadBookmarks();
   loadTasks();
   loadNote();
@@ -1006,6 +1136,8 @@ async function boot() {
   // Prices move by the minute, but a tab in the background needn't keep asking.
   every(() => { if (document.visibilityState === 'visible') loadMarkets(); }, 60 * 1000);
   every(loadServices, 30 * 1000);
+  // The server keeps each feed 10 minutes; this also turns the page over at midnight.
+  every(() => { if (document.visibilityState === 'visible') loadCalendar(); }, 5 * 60 * 1000);
 }
 
 tick();

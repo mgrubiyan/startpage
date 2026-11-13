@@ -31,6 +31,10 @@ are visible to Google.
   it. Each exchange is cached on its own, so one being down still shows the other. Off on the public demo: MOEX requires a contract to display its
   data to the public, and Binance has no policy that clearly allows it, while a
   personal instance behind a login is plain personal use.
+- **Calendar**: the coming week from up to 4 published calendars: an iPhone calendar
+  shared as an iCloud "Public Calendar" link (`webcal://…`), or a Google calendar's secret
+  iCal address. Recurring events, moved and cancelled occurrences, all-day and multi-day
+  events; days are cut in the browser's time zone.
 - **Painting of the day**: a public-domain (CC0) work from the Cleveland Museum of Art as the
   background, under a dark glass theme, with a caption linking to the museum's page.
 - **Bookmarks and settings**: stored in Postgres.
@@ -53,6 +57,7 @@ internal/fetch           shared HTTP client + JSON helper with body size limit
 internal/weather         Open-Meteo geocoding + forecast client
 internal/rates           CBR daily rates client
 internal/markets         Binance, Bybit and MOEX ISS quote clients, with fallback
+internal/calendar        iCalendar feeds: download, parse, expand recurrences into a window
 internal/suggest         search suggestions client (Google → DuckDuckGo fallback)
 internal/art             painting of the day: Cleveland Museum of Art Open Access client + daily holder
 internal/monitor         ticker-driven prober with a bounded worker pool, down/up alerts
@@ -67,7 +72,8 @@ deploy                   VPS setup: Caddy + shared Postgres, app compose, backup
 
 Only the standard library is used for HTTP and logging (`net/http` 1.22+ method
 patterns, `log/slog`). Third-party dependencies are `pgx/v5`,
-`golang.org/x/sync/singleflight` and `golang.org/x/crypto/bcrypt`.
+`golang.org/x/sync/singleflight`, `golang.org/x/crypto/bcrypt`, and `emersion/go-ical` with
+`teambition/rrule-go` for calendar feeds.
 
 ### Design notes
 
@@ -95,6 +101,24 @@ when the tab is hidden (as a `keepalive` request, so closing the tab doesn't los
   hasn't seen. With two windows edited side by side, the last save wins.
 - The text is stored as typed: no trimming, line breaks and tabs kept, CRLF turned into LF,
   other control characters refused. 10 000 characters, checked by the API and by a `CHECK`.
+
+**Calendar.** A published feed is read-only and needs no Apple ID on the server: on the
+iPhone, Calendar → Calendars → ⓘ next to one → Public Calendar → Share Link.
+- The link is the credential: anyone who has it reads that calendar. So the API never sends a
+  saved link back (settings report only how many there are, since that answer is kept in the
+  browser's storage), errors and logs name only the host, and only `https` is fetched
+  (`webcal://` is https underneath; redirects must stay on https).
+- Parsed feeds are cached per URL for 10 minutes. Each request expands them for the browser's
+  IANA zone (`?tz=`), because the server runs in a different zone than its user: that zone
+  decides where a day begins and where all-day and floating-time events fall.
+- Recurrence: `RRULE` through `rrule-go`, `EXDATE`/`RDATE` including comma-separated lists,
+  occurrences replaced by a `RECURRENCE-ID` override (moved, retitled or `CANCELLED`).
+  All-day events are sent as dates, not instants, so they don't shift a day between zones.
+- One unreadable event (say, a `TZID` that isn't an IANA zone) is skipped and counted, not
+  fatal to the feed. A series yields at most 100 occurrences per window, and minutely or
+  secondly rules are refused. A feed over 8 MiB is refused rather than cut short.
+- Like the monitor, any https host is allowed: only the logged-in owner sets the links. The
+  demo shows a made-up week and fetches nothing.
 
 **Upstream caching.** `cache.Cache[V]` wraps every external API.
 - Concurrent misses for the same key collapse into one upstream call (`singleflight`).
@@ -202,7 +226,7 @@ are open and writes are refused). JSON in, JSON out.
 | `POST` | `/api/login` | `{"password": "..."}` → sets the session cookie (204) |
 | `POST` | `/api/logout` | deletes the session |
 | `GET` | `/api/meta` | `{"demo": false}`: how the server runs (public) |
-| `GET` / `PUT` | `/api/settings` | `{"searchEngine": "g", "city": "Санкт-Петербург", "crypto": ["BTC", "ETH"], "shares": ["SBER"]}`; a list left out of a `PUT` is kept |
+| `GET` / `PUT` | `/api/settings` | `{"searchEngine": "g", "city": "Санкт-Петербург", "crypto": ["BTC", "ETH"], "shares": ["SBER"], "calendars": 1}`; a list left out of a `PUT` is kept. `calendars` is a count when read and a list of links when written (`[]` disconnects them) |
 | `GET` / `POST` | `/api/bookmarks` | list / add `{"title", "url"}` |
 | `DELETE` | `/api/bookmarks/{id}` | |
 | `GET` / `PUT` | `/api/note` | the scratchpad: `{"text"}` → `{"text", "updatedAt"}` |
@@ -215,6 +239,7 @@ are open and writes are refused). JSON in, JSON out.
 | `GET` | `/api/weather` | current weather and a five-day forecast (`days`, with sunrise/sunset) for the configured city |
 | `GET` | `/api/rates` | USD and EUR from the CBR, with previous values |
 | `GET` | `/api/markets` | crypto and MOEX boards for the settings' tickers, each with its source, delay, `stale`/`error` and the `missing` tickers; `available: false` with a `reason` on the demo |
+| `GET` | `/api/calendar?tz=` | events from now to the end of the 7th day in IANA zone `tz`: `{"configured", "from", "events": [{"title", "location", "start", "end", "allDay"}], "failed", "skipped", "stale"}`; all-day `start`/`end` are dates, `end` exclusive |
 | `GET` | `/api/suggest?q=` | search suggestions |
 | `GET` | `/api/art` | today's painting: `{"title", "artist", "date", "url", "image"}` |
 | `GET` | `/api/art/image?v=` | the painting as JPEG (the one non-JSON response) |

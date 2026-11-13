@@ -16,6 +16,9 @@ type Settings struct {
 	City         string
 	Crypto       []string // coin symbols for the markets panel, in display order
 	Shares       []string // MOEX share tickers, likewise
+	// Calendars are the feed URLs of the calendar panel. They grant read
+	// access to the calendars, so treat them like passwords.
+	Calendars []string
 }
 
 // Bookmark is a tile on the start page.
