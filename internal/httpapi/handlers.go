@@ -46,10 +46,17 @@ type settingsDTO struct {
 	City         string   `json:"city"`
 	Crypto       []string `json:"crypto"`
 	Shares       []string `json:"shares"`
+	// Calendars is how many calendar links are saved. The links themselves
+	// stay on the server: each one is read access to a calendar, and this
+	// answer is kept in the browser's storage.
+	Calendars int `json:"calendars"`
 }
 
 func toSettingsDTO(s store.Settings) settingsDTO {
-	return settingsDTO{SearchEngine: s.SearchEngine, City: s.City, Crypto: orEmpty(s.Crypto), Shares: orEmpty(s.Shares)}
+	return settingsDTO{
+		SearchEngine: s.SearchEngine, City: s.City, Crypto: orEmpty(s.Crypto), Shares: orEmpty(s.Shares),
+		Calendars: len(s.Calendars),
+	}
 }
 
 // orEmpty makes a missing list [] in JSON rather than null.
@@ -67,6 +74,9 @@ type settingsInput struct {
 	// lists existed can't clear them by saving the other settings.
 	Crypto *[]string `json:"crypto"`
 	Shares *[]string `json:"shares"`
+	// Calendars replaces the saved links when present; [] removes them all.
+	// The page can't show the saved ones, so it leaves this out to keep them.
+	Calendars *[]string `json:"calendars"`
 }
 
 // maxTickers matches the migration's CHECK: a row of the panel, not a terminal.
@@ -182,9 +192,11 @@ type api struct {
 	art     ArtSource
 	crypto  MarketSource
 	stocks  MarketSource
-	auth    Authenticator
-	limiter RateLimiter
-	logger  *slog.Logger
+	// calendars is a field of its own: the links come from the settings per request.
+	calendars CalendarSource
+	auth      Authenticator
+	limiter   RateLimiter
+	logger    *slog.Logger
 
 	secureCookie bool
 	trustProxy   bool
@@ -233,13 +245,13 @@ func (a *api) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	next := store.Settings{SearchEngine: in.SearchEngine, City: city}
-	if in.Crypto == nil || in.Shares == nil {
+	if in.Crypto == nil || in.Shares == nil || in.Calendars == nil {
 		cur, err := a.store.Settings(r.Context())
 		if err != nil {
 			a.internalError(w, r, err)
 			return
 		}
-		next.Crypto, next.Shares = cur.Crypto, cur.Shares
+		next.Crypto, next.Shares, next.Calendars = cur.Crypto, cur.Shares, cur.Calendars
 	}
 	if in.Crypto != nil {
 		if next.Crypto, err = cleanTickers(*in.Crypto, coinSymbol); err != nil {
@@ -250,6 +262,12 @@ func (a *api) putSettings(w http.ResponseWriter, r *http.Request) {
 	if in.Shares != nil {
 		if next.Shares, err = cleanTickers(*in.Shares, shareTicker); err != nil {
 			writeError(w, http.StatusBadRequest, "shares: "+err.Error())
+			return
+		}
+	}
+	if in.Calendars != nil {
+		if next.Calendars, err = cleanCalendars(*in.Calendars); err != nil {
+			writeError(w, http.StatusBadRequest, "calendars: "+err.Error())
 			return
 		}
 	}

@@ -15,6 +15,10 @@ export default async function globalSetup() {
     await api.delete(`/api/bookmarks/${b.id}`);
   }
   await api.put('/api/note', { data: { text: '' } });
+  const settings = await (await api.get('/api/settings')).json();
+  await api.put('/api/settings', {
+    data: { searchEngine: settings.searchEngine, city: settings.city, calendars: [] },
+  });
 
   await api.storageState({ path: stateFile });
   await api.dispose();
