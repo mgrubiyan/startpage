@@ -226,3 +226,37 @@ test('bookmarks are put in order by dragging, or with Alt+arrows', async ({ page
   const shown = await page.locator('#bookmarks li .label').allTextContents();
   expect(shown.filter((t) => t.endsWith(String(tag)))).toEqual([names[1], names[0], names[2]]);
 });
+
+test('the line under the date names the next event today and likely rain', async ({ page }) => {
+  const now = Date.now();
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const day = new Date(now);
+  const from = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+  await page.route('**/api/calendar?*', (route) => route.fulfill({
+    json: { configured: true, from, events: [
+      { title: 'Прошедшее', start: iso(now - 3 * 3600e3), end: iso(now - 2 * 3600e3), allDay: false },
+      { title: 'Созвон', start: iso(now + 20 * 60e3), end: iso(now + 50 * 60e3), allDay: false },
+    ] },
+  }));
+  await page.goto('/');
+  await expect(page.locator('#today')).toContainText(/Через (19|20) мин: Созвон/);
+});
+
+test('services fold into one line that says which are down', async ({ page }) => {
+  const check = (ok: boolean) => ({ ok, statusCode: ok ? 200 : 503, latencyMs: 40, checkedAt: new Date().toISOString() });
+  await page.route('**/api/services', (route) => route.fulfill({
+    json: [
+      { id: 1, name: 'Бот', url: 'https://a.example/health', lastCheck: check(true), history: [] },
+      { id: 2, name: 'Парсер', url: 'https://b.example/health', lastCheck: check(false), history: [] },
+    ],
+  }));
+  await page.goto('/');
+  await page.evaluate(() => localStorage.removeItem('startpage.servicesOpen'));
+  await page.reload();
+  const summary = page.locator('#services-summary');
+  await expect(summary).toHaveText(/Не отвечает: Парсер/);
+  await expect(page.locator('#services')).toBeHidden();
+  await summary.click();
+  await expect(page.locator('#services')).toBeVisible();
+  await expect(summary).toHaveAttribute('aria-expanded', 'true');
+});

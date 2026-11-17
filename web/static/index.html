@@ -39,6 +39,7 @@
       <div class="clock">
         <div id="time" class="time">--:--</div>
         <div id="date" class="date"></div>
+        <div id="today" class="today" hidden></div>
       </div>
       <div class="widgets">
         <div class="chip" id="weather" title="Погода">
@@ -156,6 +157,9 @@
         <button type="button" id="services-edit" class="ghost edit-only">Изменить</button>
       </div>
     </section>
+    <!-- The list folded into one line: all well, or which ones are down. -->
+    <button type="button" id="services-summary" class="services-summary" aria-expanded="false"
+            aria-controls="services" hidden></button>
     <ul id="services" class="services"></ul>
 
     <form id="add-service" class="inline-form" hidden>

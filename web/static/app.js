@@ -153,8 +153,15 @@ function holdUndo(why, on) {
 }
 
 $('toast-undo').addEventListener('click', takeBack);
-$('toast').addEventListener('pointerenter', () => holdUndo('pointer', true));
-$('toast').addEventListener('pointerleave', () => holdUndo('pointer', false));
+// A real move onto it, not the toast popping up under a cursor left where the
+// × was: that would pause it until the mouse happened to move again.
+let undoPointer = null; // where the pointer was when the toast opened
+document.addEventListener('pointerdown', (e) => { undoPointer = [e.clientX, e.clientY]; }, true);
+$('toast').addEventListener('pointermove', (e) => {
+  if (undoHolds.has('pointer')) return;
+  if (!undoPointer || Math.hypot(e.clientX - undoPointer[0], e.clientY - undoPointer[1]) > 4) holdUndo('pointer', true);
+});
+$('toast').addEventListener('pointerleave', () => { undoPointer = [-1e4, -1e4]; holdUndo('pointer', false); });
 $('toast').addEventListener('focusin', () => holdUndo('focus', true));
 $('toast').addEventListener('focusout', () => holdUndo('focus', false));
 // ⌘Z / Ctrl+Z, outside a text field (which has its own undo).
@@ -259,17 +266,66 @@ $('logout').addEventListener('click', async () => {
 });
 
 // ---------- clock ----------
+let tickMinute = -1;
+
 function tick() {
   const now = new Date();
   $('time').textContent = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   const d = now.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
   $('date').textContent = d.charAt(0).toUpperCase() + d.slice(1);
+  if (now.getMinutes() !== tickMinute) {
+    tickMinute = now.getMinutes();
+    renderToday(); // "через 25 мин" moves on
+  }
+}
+
+// ---------- today ----------
+// One line under the date with what matters next: the event on now, or the
+// next one today, and rain when it's likely. Made of what the calendar and the
+// weather have already loaded, so it costs no request of its own.
+let todayCalendar = null;
+let todayWeather = null;
+
+function nextEvent(c, now) {
+  if (!c || !c.configured) return '';
+  const today = isoDay(now);
+  let allDay = null;
+  // Sorted by start, so today's all-day events come before its timed ones.
+  for (const e of c.events) {
+    if (e.allDay) {
+      if (!allDay && e.start <= today && today < e.end) allDay = e;
+      continue;
+    }
+    const start = new Date(e.start);
+    const end = new Date(e.end);
+    if (end <= now) continue;
+    if (start <= now) return `Сейчас: ${e.title}, до ${hhmm(end)}`;
+    if (isoDay(start) !== today) break;
+    const mins = Math.max(1, Math.ceil((start - now) / 60000));
+    return mins <= 60 ? `Через ${mins} мин: ${e.title}` : `В ${hhmm(start)}: ${e.title}`;
+  }
+  return allDay ? `Сегодня: ${allDay.title}` : '';
+}
+
+function rainToday(w) {
+  const p = w && w.days && w.days[0] && w.days[0].precipitation;
+  return p >= 50 ? `💧 осадки ${p}%` : '';
+}
+
+function renderToday() {
+  const parts = [nextEvent(todayCalendar, new Date()), rainToday(todayWeather)].filter(Boolean);
+  const line = $('today');
+  line.textContent = parts.join(' · ');
+  line.title = line.textContent;
+  line.hidden = !parts.length;
 }
 
 // ---------- weather ----------
 const fmtTemp = (t) => { const r = Math.round(t); return (r > 0 ? '+' : '') + r + '°'; };
 
 function renderWeather(w) {
+  todayWeather = w;
+  renderToday();
   $('weather-city').textContent = w.location;
   $('weather-value').textContent = `${w.icon} ${fmtTemp(w.temperature)} · ${Math.round(w.windMs)} м/с`;
   $('weather').title = `${w.description}, ощущается как ${fmtTemp(w.feelsLike)}` + (w.stale ? ' · данные устарели' : '');
@@ -282,6 +338,8 @@ async function loadWeather() {
   } catch (e) {
     if (ignorable(e)) return;
     undrawn('weather');
+    todayWeather = null;
+    renderToday();
     $('weather-city').textContent = state.settings.city || 'Погода';
     $('weather-value').textContent = '—';
     $('weather').title = 'Погода недоступна: ' + e.message;
@@ -698,6 +756,8 @@ function agendaItem(e, day) {
 }
 
 function renderCalendar(c) {
+  todayCalendar = c;
+  renderToday();
   $('calendar-board').hidden = !c.configured;
   const root = $('calendar');
   root.textContent = '';
@@ -731,6 +791,8 @@ async function loadCalendar() {
   } catch (e) {
     if (ignorable(e)) return;
     undrawn('calendar');
+    todayCalendar = null;
+    renderToday();
     // Only a saved link can fail to load; without one the panel stays away.
     $('calendar-board').hidden = !(state.settings.calendars > 0);
     const root = $('calendar');
@@ -1040,9 +1102,47 @@ function historyBars(history, uptime) {
   return row;
 }
 
+// Folded to one line by default: most of the time it only says all is well.
+// Opened, it stays open in this browser; editing always opens it.
+const SERVICES_OPEN = 'startpage.servicesOpen';
+let servicesOpen = (() => { try { return localStorage.getItem(SERVICES_OPEN) === '1'; } catch { return false; } })();
+let servicesShown = 0; // services in the list; 0 also when it failed to load
+
+function servicesSummary(items) {
+  const down = items.filter((s) => s.lastCheck && !s.lastCheck.ok);
+  if (down.length) {
+    return ['fail', `${down.length === 1 ? 'Не отвечает' : 'Не отвечают'}: ${down.map((s) => s.name).join(', ')}`];
+  }
+  const ok = items.filter((s) => s.lastCheck).length;
+  if (!ok) return ['', 'Проверяются…'];
+  if (ok < items.length) return ['ok', `Работают ${ok} из ${items.length}, остальные проверяются`];
+  return ['ok', items.length === 1 ? 'Работает' : `Все ${items.length} работают`];
+}
+
+function foldServices() {
+  const list = $('services');
+  const button = $('services-summary');
+  const editing = list.classList.contains('editing');
+  button.hidden = !servicesShown || editing;
+  list.hidden = !(servicesOpen || editing || !servicesShown);
+  button.setAttribute('aria-expanded', String(!list.hidden));
+}
+
+$('services-summary').addEventListener('click', () => {
+  servicesOpen = !servicesOpen;
+  try { localStorage.setItem(SERVICES_OPEN, servicesOpen ? '1' : '0'); } catch { /* open for this tab only */ }
+  foldServices();
+});
+
 function renderServices(items) {
   const ul = $('services');
   ul.textContent = '';
+  servicesShown = items.length;
+  const [cls, text] = servicesSummary(items);
+  const button = $('services-summary');
+  button.textContent = '';
+  button.append(el('span', 'dot ' + cls), el('span', 'name', text));
+  foldServices();
   if (!items.length) {
     ul.append(el('li', 'empty', 'Пока пусто. Нажми «Изменить» и добавь адрес /health бота.'));
     return;
@@ -1082,11 +1182,16 @@ async function loadServices() {
   } catch (e) {
     if (ignorable(e)) return;
     undrawn('services'); // the message replaced the list: draw it again next time
+    servicesShown = 0;
+    foldServices();
     $('services').textContent = 'Статусы не загрузились: ' + e.message;
   }
 }
 
-$('services-edit').addEventListener('click', (e) => toggleEditing('services', 'add-service', e.currentTarget, 'svc-name'));
+$('services-edit').addEventListener('click', (e) => {
+  toggleEditing('services', 'add-service', e.currentTarget, 'svc-name');
+  foldServices();
+});
 
 $('add-service').addEventListener('submit', async (e) => {
   e.preventDefault();
