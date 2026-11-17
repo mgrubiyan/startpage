@@ -199,6 +199,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .ghost[aria-pressed="true"] { color: var(--text); background: var(--surface); }
 
 .bookmarks {
+  position: relative; /* the tiles' offsets count from here (drag to reorder) */
   list-style: none;
   padding: 0;
   margin: 0;
@@ -267,6 +268,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: none;
 }
 .editing .remove { display: block; }
+/* Editing: tiles are picked up, not opened; touch drags them instead of scrolling. */
+.bookmarks.editing a { cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.bookmarks.editing a:active { transform: none; }
+.bookmarks li.dragging { z-index: 5; }
+.bookmarks li.dragging a { cursor: grabbing; transform: scale(1.04); box-shadow: 0 12px 32px rgba(0, 0, 0, .35); }
+.wide-hint { flex-basis: 100%; margin: 0; }
+@media (pointer: coarse) { .keys-hint { display: none; } }
 
 .inline-form, .settings {
   margin-top: 16px;

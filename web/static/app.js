@@ -850,6 +850,136 @@ function toggleEditing(listId, formId, button, firstInputId) {
 
 $('edit-toggle').addEventListener('click', (e) => toggleEditing('bookmarks', 'add-bookmark', e.currentTarget, 'bm-title'));
 
+// ---------- bookmark order ----------
+// While editing, a tile is dragged to its place (mouse or finger), or moved
+// with Alt+←/→ from the keyboard. The others make way with a short slide, so
+// it's clear where things went. Links don't open while editing: a drag ends in
+// a click, and it would.
+const bmList = $('bookmarks');
+const editingBookmarks = () => bmList.classList.contains('editing');
+
+bmList.addEventListener('click', (e) => {
+  if (editingBookmarks() && e.target.closest('a')) e.preventDefault();
+});
+// A link (and its icon) would start the browser's own drag, which cancels ours.
+bmList.addEventListener('dragstart', (e) => { if (editingBookmarks()) e.preventDefault(); });
+
+// Every tile's place before a move; after it, each slides from there to its new one.
+function slideTiles(move) {
+  const tiles = [...bmList.children];
+  const before = new Map(tiles.map((li) => [li, li.getBoundingClientRect()]));
+  move();
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  tiles.forEach((li) => {
+    if (li.classList.contains('dragging')) return;
+    const a = before.get(li);
+    const b = li.getBoundingClientRect();
+    const dx = a.left - b.left;
+    const dy = a.top - b.top;
+    if (!dx && !dy) return;
+    li.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }],
+      { duration: 200, easing: 'cubic-bezier(.23, 1, .32, 1)' });
+  });
+}
+
+const tileIds = () => [...bmList.children].map((li) => Number(li.dataset.id)).filter(Boolean);
+
+async function saveOrder() {
+  const ids = tileIds();
+  // Tiles waiting behind «Вернуть» still exist on the server: keep them in the list.
+  const order = [...ids, ...bookmarks.map((b) => b.id).filter((id) => !ids.includes(id))];
+  if (order.join() === bookmarks.map((b) => b.id).join()) return;
+  const byId = new Map(bookmarks.map((b) => [b.id, b]));
+  const next = order.map((id) => byId.get(id));
+  const before = bookmarks;
+  bookmarks = next;
+  try {
+    await api('/api/bookmarks/order', { method: 'PUT', body: { ids: order } });
+    show('bookmarks', next, () => {}); // kept and marked drawn: it's on screen already
+    $('bm-error').textContent = '';
+  } catch (e) {
+    if (ignorable(e)) return;
+    bookmarks = before;
+    $('bm-error').textContent = e.status === 409
+      ? 'Закладки изменились в другой вкладке: показываю как есть'
+      : 'Порядок не сохранился: ' + e.message;
+    undrawn('bookmarks');
+    loadBookmarks();
+  }
+}
+
+let drag = null; // { li, id, startX, startY, grabX, grabY, moved }
+
+bmList.addEventListener('pointerdown', (e) => {
+  const li = e.target.closest('li[data-id]');
+  if (!editingBookmarks() || !li || e.target.closest('.remove') || e.button !== 0) return;
+  const r = li.getBoundingClientRect();
+  drag = { li, startX: e.clientX, startY: e.clientY, grabX: e.clientX - r.left, grabY: e.clientY - r.top, moved: false, pointer: e.pointerId };
+});
+
+bmList.addEventListener('pointermove', (e) => {
+  if (!drag || e.pointerId !== drag.pointer) return;
+  const { li } = drag;
+  if (!drag.moved) {
+    if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 5) return;
+    drag.moved = true;
+    li.classList.add('dragging');
+    try { li.setPointerCapture(e.pointerId); } catch { /* moves still reach the list */ }
+  }
+  // The tile it's over takes it: judged by the grid slots, not by where the
+  // tiles are drawn mid-slide, or two of them would swap back and forth.
+  const over = [...bmList.children].find((t) => {
+    if (t === li) return false;
+    const r = slot(t);
+    return e.clientX > r.left && e.clientX < r.right && e.clientY > r.top && e.clientY < r.bottom;
+  });
+  if (over) {
+    const after = [...bmList.children].indexOf(over) > [...bmList.children].indexOf(li);
+    slideTiles(() => bmList.insertBefore(li, after ? over.nextSibling : over));
+  }
+  // Follow the pointer from the slot the tile now has.
+  const home = slot(li);
+  li.style.transform = `translate(${e.clientX - drag.grabX - home.left}px, ${e.clientY - drag.grabY - home.top}px)`;
+});
+
+// A tile's place in the grid on screen, whatever transform it's drawn with:
+// offsets are layout, counted from the list (positioned for that in the CSS),
+// and the list itself is never moved.
+function slot(t) {
+  const list = bmList.getBoundingClientRect();
+  const left = list.left + t.offsetLeft;
+  const top = list.top + t.offsetTop;
+  return { left, top, right: left + t.offsetWidth, bottom: top + t.offsetHeight };
+}
+
+function endDrag() {
+  if (!drag) return;
+  const { li, moved } = drag;
+  drag = null;
+  if (!moved) return;
+  li.classList.remove('dragging');
+  const from = li.style.transform;
+  li.style.transform = '';
+  if (from && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    li.animate([{ transform: from }, { transform: 'none' }], { duration: 200, easing: 'cubic-bezier(.23, 1, .32, 1)' });
+  }
+  saveOrder();
+}
+bmList.addEventListener('pointerup', endDrag);
+bmList.addEventListener('pointercancel', endDrag);
+
+bmList.addEventListener('keydown', (e) => {
+  if (!editingBookmarks() || !e.altKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+  const li = e.target.closest('li[data-id]');
+  if (!li) return;
+  e.preventDefault();
+  const sib = e.key === 'ArrowLeft' ? li.previousElementSibling : li.nextElementSibling;
+  if (!sib) return;
+  slideTiles(() => bmList.insertBefore(li, e.key === 'ArrowLeft' ? sib : sib.nextSibling));
+  e.target.focus();
+  saveOrder();
+});
+
 $('add-bookmark').addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.currentTarget;

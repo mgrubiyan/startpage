@@ -198,6 +198,40 @@ func TestBookmarksCRUD(t *testing.T) {
 	if _, err := s.AddBookmark(ctx, store.Bookmark{Title: "", URL: "https://x.y"}); err == nil {
 		t.Fatal("empty title must violate CHECK constraint")
 	}
+
+	// Reversed, and read back reversed.
+	list, err := s.Bookmarks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]int64, len(list))
+	for i, b := range list {
+		ids[len(list)-1-i] = b.ID
+	}
+	if err := s.ReorderBookmarks(ctx, ids); err != nil {
+		t.Fatal(err)
+	}
+	if list, err = s.Bookmarks(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for i, b := range list {
+		if b.ID != ids[i] {
+			t.Fatalf("after reorder: %+v, want ids %v", list, ids)
+		}
+	}
+	// A list that misses one, repeats one or names a stranger changes nothing.
+	for name, bad := range map[string][]int64{
+		"missing":  ids[1:],
+		"repeated": append([]int64{ids[1]}, ids[1:]...),
+		"unknown":  append(append([]int64{}, ids[1:]...), 1<<40),
+	} {
+		if err := s.ReorderBookmarks(ctx, bad); !errors.Is(err, store.ErrConflict) {
+			t.Errorf("%s: err = %v, want ErrConflict", name, err)
+		}
+	}
+	if again, _ := s.Bookmarks(ctx); again[0].ID != ids[0] {
+		t.Errorf("a refused reorder moved things: %+v", again)
+	}
 }
 
 func TestSessions(t *testing.T) {

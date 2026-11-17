@@ -67,6 +67,7 @@ func (a *api) routes() []route {
 		{"GET /api/bookmarks", a.listBookmarks, false},
 		{"POST /api/bookmarks", a.createBookmark, false},
 		{"DELETE /api/bookmarks/{id}", a.deleteBookmark, false},
+		{"PUT /api/bookmarks/order", a.reorderBookmarks, false},
 		{"GET /api/note", a.getNote, false},
 		{"PUT /api/note", a.putNote, false},
 		{"GET /api/tasks", a.listTasks, false},
