@@ -226,6 +226,22 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .inline-form input { flex: 1 1 160px; }
 .settings label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); flex: 1 1 200px; }
+.settings .wide { flex-basis: 100%; }
+.settings textarea {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+.settings .set-hint { margin: -4px 0 0; }
+/* A secondary action beside Save, not a second primary button. */
+.settings button.ghost { background: none; color: var(--muted); padding: 8px 10px; }
+@media (hover: hover) and (pointer: fine) {
+  .settings button.ghost:hover { color: var(--danger); background: var(--surface); }
+}
 .settings label > * { font-size: 15px; color: var(--text); }
 .inline-form button, .settings button, .login-card button {
   padding: 8px 14px;
@@ -397,6 +413,28 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .forecast .temps { font-size: 12px; }
 }
 
+/* ---------- calendar ---------- */
+/* A card per day with events, like the forecast; days without any are left out. */
+.agenda { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; align-items: start; }
+.agenda .note-line { grid-column: 1 / -1; color: var(--muted); font-size: 13px; margin: 0; }
+.agenda-day {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.agenda-day h3 { margin: 0 0 6px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.agenda-day ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.agenda-day li { display: grid; grid-template-columns: 3.2em minmax(0, 1fr); gap: 8px; align-items: baseline; font-size: 14px; line-height: 1.35; }
+.agenda-day .when { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.agenda-day .what { min-width: 0; overflow-wrap: anywhere; }
+.agenda-day .where { display: block; color: var(--muted); font-size: 12px; }
+/* All-day events have no time to show: a coloured edge marks them instead. */
+.agenda-day li.all-day { grid-template-columns: minmax(0, 1fr); }
+.agenda-day li.all-day .what { padding-left: 8px; border-left: 2px solid var(--accent); }
+.agenda.stale .agenda-day { opacity: .7; }
+
 /* ---------- markets ---------- */
 .markets { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
 @media (max-width: 640px) { .markets { grid-template-columns: 1fr; } }
@@ -492,7 +530,7 @@ body.has-art {
 }
 .has-art :is(.chip, .search input, .suggestions, .bookmarks a, .services li, .demo-banner,
   .inline-form input, .settings input, .settings select, .login-card, .ghost:hover, .ghost[aria-pressed="true"],
-  .tasks li, .task-form input, .note, .forecast li, .quotes li) {
+  .tasks li, .task-form input, .note, .forecast li, .quotes li, .agenda-day, .settings textarea) {
   /* 12px reads the same as more and costs far less with dozens of tiles on a phone. */
   -webkit-backdrop-filter: blur(12px) saturate(150%);
   backdrop-filter: blur(12px) saturate(150%);
