@@ -14,7 +14,7 @@ the Go JSON API; the browser doesn't call third-party APIs. The one exception is
 bookmark icons, which load from Google's favicon service, so bookmark hostnames
 are visible to Google.
 
-![startpage in demo mode over the painting of the day: clock, weather, CBR rates, search, bookmarks and the service monitor](docs/screenshot.jpeg)
+![startpage in demo mode over the painting of the day: clock, weather, CBR rates, search, bookmarks, tasks and a note, a five-day forecast with sunrise and sunset, and the service monitor with a day of hourly uptime bars](docs/screenshot.jpeg)
 
 ## Features
 
