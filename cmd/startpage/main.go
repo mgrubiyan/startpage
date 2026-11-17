@@ -20,6 +20,7 @@ import (
 	"github.com/mgrubiyan/startpage/internal/calendar"
 	"github.com/mgrubiyan/startpage/internal/config"
 	"github.com/mgrubiyan/startpage/internal/demo"
+	"github.com/mgrubiyan/startpage/internal/digest"
 	"github.com/mgrubiyan/startpage/internal/fetch"
 	"github.com/mgrubiyan/startpage/internal/httpapi"
 	"github.com/mgrubiyan/startpage/internal/markets"
@@ -83,8 +84,10 @@ func run() error {
 	}
 
 	var alerts monitor.Notifier // stays a nil interface when Telegram isn't configured
+	var bot *telegram.Bot
 	if cfg.TelegramToken != "" {
-		alerts = telegram.New(&http.Client{Timeout: 10 * time.Second}, cfg.TelegramToken, cfg.TelegramChatID)
+		bot = telegram.New(&http.Client{Timeout: 10 * time.Second}, cfg.TelegramToken, cfg.TelegramChatID)
+		alerts = bot
 		logger.Info("monitor alerts go to Telegram")
 	}
 	mon := monitor.New(db, logger, monitor.Config{Interval: cfg.MonitorInterval, Notifier: alerts})
@@ -179,15 +182,42 @@ func run() error {
 		}
 	}()
 
+	weatherCache := cache.New(10*time.Minute, weatherClient.Current, cache.WithMaxEntries(50))
+	ratesCache := cache.New(time.Hour, func(ctx context.Context, _ string) (rates.Rates, error) {
+		return ratesClient.Latest(ctx)
+	})
+
+	// The morning digest reads the same caches as the page: no extra requests.
+	if bot != nil && cfg.DigestAt >= 0 {
+		src := digest.Sources{
+			Settings: db.Settings,
+			Weather: func(ctx context.Context, city string) (weather.Report, error) {
+				r, err := weatherCache.Get(ctx, city)
+				return r.Value, err
+			},
+			Rates: func(ctx context.Context) (rates.Rates, error) {
+				r, err := ratesCache.Get(ctx, "")
+				return r.Value, err
+			},
+			Services: db.ServiceStatuses,
+		}
+		if calendars != nil {
+			src.Calendar = func(ctx context.Context, link string) (*calendar.Calendar, error) {
+				r, err := calendars.Get(ctx, link)
+				return r.Value, err
+			}
+		}
+		go digest.New(src, bot, cfg.DigestAt, cfg.DigestZone, logger).Run(ctx)
+		logger.Info("morning digest scheduled", "at", fmt.Sprintf("%02d:%02d", cfg.DigestAt/60, cfg.DigestAt%60), "zone", cfg.DigestZone.String())
+	}
+
 	handler := httpapi.New(httpapi.Deps{
-		Logger:  logger,
-		Static:  web.Static(),
-		Store:   db,
-		Ping:    db.Ping,
-		Weather: cache.New(10*time.Minute, weatherClient.Current, cache.WithMaxEntries(50)),
-		Rates: cache.New(time.Hour, func(ctx context.Context, _ string) (rates.Rates, error) {
-			return ratesClient.Latest(ctx)
-		}),
+		Logger:            logger,
+		Static:            web.Static(),
+		Store:             db,
+		Ping:              db.Ping,
+		Weather:           weatherCache,
+		Rates:             ratesCache,
 		Suggest:           cache.New(time.Hour, suggestClient.Suggest, cache.WithLoadTimeout(3*time.Second)),
 		Art:               artwork,
 		Crypto:            cryptoBoard,

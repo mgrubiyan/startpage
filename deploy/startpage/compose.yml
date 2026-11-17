@@ -25,6 +25,8 @@ services:
       # Optional monitor alerts; only here, the demo refuses them.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      STARTPAGE_DIGEST_AT: ${STARTPAGE_DIGEST_AT:-08:00}
+      STARTPAGE_DIGEST_TZ: ${STARTPAGE_DIGEST_TZ:-Europe/Moscow}
       LOG_LEVEL: ${LOG_LEVEL:-info}
 
   startpage-demo:
