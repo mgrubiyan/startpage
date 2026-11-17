@@ -495,7 +495,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .pick-note.error { color: var(--danger); }
 /* Over the painting the dropdown needs a solid backing to stay readable. */
 .has-art .pick-options { background: rgb(22, 22, 26); }
-.has-art :is(.pick-options li[aria-selected="true"], .picked li) { background: rgba(255, 255, 255, .08); }
+.has-art :is(.pick-options li[aria-selected="true"], .picked li:not(.empty)) { background: rgba(255, 255, 255, .08); }
 
 /* ---------- calendar ---------- */
 /* A card per day with events, like the forecast; days without any are left out. */

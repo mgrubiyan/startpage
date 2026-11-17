@@ -18,6 +18,10 @@ type Listing struct {
 	Name   string // Bitcoin, Сбербанк
 }
 
+// binanceTicker24h is Binance's 24h ticker on its public market-data host, for
+// the quotes and for the list of coins alike.
+const binanceTicker24h = "https://data-api.binance.vision/api/v3/ticker/24hr"
+
 // catalogBodyLimit fits Binance's ticker for every pair (about 1 MiB in 2026)
 // with room to grow.
 const catalogBodyLimit = 4 << 20
@@ -26,7 +30,7 @@ const catalogBodyLimit = 4 << 20
 // traded first, for picking the crypto board. Pairs with no trades in a day
 // (delisted ones linger in the ticker) are left out.
 func BinanceCoins(ctx context.Context, hc *http.Client) ([]Listing, error) {
-	return binanceCoins(ctx, hc, "https://data-api.binance.vision/api/v3/ticker/24hr?type=MINI")
+	return binanceCoins(ctx, hc, binanceTicker24h+"?type=MINI")
 }
 
 func binanceCoins(ctx context.Context, hc *http.Client, rawURL string) ([]Listing, error) {

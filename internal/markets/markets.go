@@ -91,11 +91,7 @@ var coinNames = map[string]string{
 func Coins(symbols []string) []Coin {
 	out := make([]Coin, len(symbols))
 	for i, s := range symbols {
-		name := coinNames[s]
-		if name == "" {
-			name = s
-		}
-		out[i] = Coin{Symbol: s, Name: name}
+		out[i] = Coin{Symbol: s, Name: coinName(s)}
 	}
 	return out
 }

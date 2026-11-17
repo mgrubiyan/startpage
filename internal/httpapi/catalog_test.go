@@ -44,6 +44,24 @@ func TestMarketCatalog(t *testing.T) {
 	}
 }
 
+// The picker saves one list at a time: what a PUT leaves out stays as it was.
+func TestSettingsPatch(t *testing.T) {
+	env := newTestEnv(t)
+	before := decode[settingsDTO](t, env.do(t, "GET", "/api/settings", ""))
+	got := decode[settingsDTO](t, env.do(t, "PUT", "/api/settings", `{"crypto":["doge"]}`))
+	if !reflect.DeepEqual(got.Crypto, []string{"DOGE"}) || got.City != before.City ||
+		got.SearchEngine != before.SearchEngine || !reflect.DeepEqual(got.Shares, before.Shares) {
+		t.Fatalf("before %+v, after a crypto-only PUT %+v", before, got)
+	}
+	got = decode[settingsDTO](t, env.do(t, "PUT", "/api/settings", `{"shares":["vtbr"]}`))
+	if !reflect.DeepEqual(got.Crypto, []string{"DOGE"}) || !reflect.DeepEqual(got.Shares, []string{"VTBR"}) {
+		t.Fatalf("after a shares-only PUT %+v", got)
+	}
+	if rec := env.do(t, "PUT", "/api/settings", `{"searchEngine":"nope"}`); rec.Code != 400 {
+		t.Fatalf("unknown engine: %d", rec.Code)
+	}
+}
+
 func TestMarketCatalogOff(t *testing.T) {
 	for name, env := range map[string]*testEnv{"demo": demoEnv(t), "no catalog": newTestEnv(t)} {
 		rec := env.do(t, "GET", "/api/markets/catalog", "")

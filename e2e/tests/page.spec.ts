@@ -86,10 +86,15 @@ test('coins are picked from the exchange list, and bookmarks open in a new tab',
       shares: { items: [], error: 'список недоступен' },
     } });
   });
-  await page.request.post('/api/bookmarks', { data: { title: 'Вкладка', url: 'https://example.com' } });
+  // Its own starting point, so it can run again (--repeat-each) on its own data.
+  await page.request.put('/api/settings', {
+    data: { crypto: ['BTC', 'ETH', 'SOL', 'TON'], shares: ['SBER', 'GAZP', 'LKOH', 'YDEX'] },
+  });
+  const title = `Вкладка ${Date.now()}`;
+  await page.request.post('/api/bookmarks', { data: { title, url: 'https://example.com' } });
   await page.goto('/');
 
-  const link = page.locator('#bookmarks a', { hasText: 'Вкладка' });
+  const link = page.locator('#bookmarks a', { hasText: title });
   await expect(link).toHaveAttribute('target', '_blank');
   await expect(link).toHaveAttribute('rel', /noopener/);
 
@@ -115,9 +120,10 @@ test('coins are picked from the exchange list, and bookmarks open in a new tab',
   await shares.press('Enter');
   await expect(page.locator('#markets-picker .picked').nth(1)).toContainText('VTBR');
 
-  const saved = await (await page.request.get('/api/settings')).json();
-  expect(saved.crypto).toEqual(['ETH', 'SOL', 'TON', 'DOGE']);
-  expect(saved.shares).toContain('VTBR');
+  // Chips show before their saves finish: wait for the server to have both.
+  const stored = async () => (await page.request.get('/api/settings')).json();
+  await expect.poll(async () => (await stored()).shares).toContain('VTBR');
+  await expect.poll(async () => (await stored()).crypto).toEqual(['ETH', 'SOL', 'TON', 'DOGE']);
 });
 
 // A calendar link is read access to the calendar: it goes to the server and

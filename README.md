@@ -230,7 +230,7 @@ are open and writes are refused). JSON in, JSON out.
 | `POST` | `/api/login` | `{"password": "..."}` → sets the session cookie (204) |
 | `POST` | `/api/logout` | deletes the session |
 | `GET` | `/api/meta` | `{"demo": false}`: how the server runs (public) |
-| `GET` / `PUT` | `/api/settings` | `{"searchEngine": "g", "city": "Санкт-Петербург", "crypto": ["BTC", "ETH"], "shares": ["SBER"], "calendars": 1}`; a list left out of a `PUT` is kept. `calendars` is a count when read and a list of links when written (`[]` disconnects them) |
+| `GET` / `PUT` | `/api/settings` | `{"searchEngine": "g", "city": "Санкт-Петербург", "crypto": ["BTC", "ETH"], "shares": ["SBER"], "calendars": 1}`; a `PUT` is a patch: a field left out keeps its value (one atomic update). `calendars` is a count when read and a list of links when written (`[]` disconnects them) |
 | `GET` / `POST` | `/api/bookmarks` | list / add `{"title", "url"}` |
 | `DELETE` | `/api/bookmarks/{id}` | |
 | `GET` / `PUT` | `/api/note` | the scratchpad: `{"text"}` → `{"text", "updatedAt"}` |

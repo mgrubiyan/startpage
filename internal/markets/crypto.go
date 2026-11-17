@@ -24,7 +24,7 @@ type Binance struct {
 
 // NewBinance returns a client for coins.
 func NewBinance(hc *http.Client, coins []Coin) *Binance {
-	return &Binance{http: hc, url: "https://data-api.binance.vision/api/v3/ticker/24hr", coins: coins}
+	return &Binance{http: hc, url: binanceTicker24h, coins: coins}
 }
 
 type binanceTicker struct {
