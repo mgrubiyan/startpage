@@ -27,6 +27,7 @@ test('logging out forgets the kept page', async ({ page }) => {
   await expect(page.locator('#app')).toBeVisible();
   await expect.poll(kept).toContain('startpage.last.settings');
 
+  await page.getByRole('button', { name: 'Настройки' }).click();
   await page.getByRole('button', { name: 'Выйти' }).click();
   await expect(page.locator('#login')).toBeVisible();
   expect(await kept()).toEqual([]);

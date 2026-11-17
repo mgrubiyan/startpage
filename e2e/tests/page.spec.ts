@@ -157,3 +157,38 @@ test('a calendar link is saved write-only and can be disconnected', async ({ pag
   await expect(board).toBeHidden();
   await expect(page.locator('#set-calendars-off')).toBeHidden();
 });
+
+test('a deleted task can be taken back, and is deleted once the toast is gone', async ({ page }) => {
+  const title = `Удаляемая ${Date.now()}`;
+  await page.request.post('/api/tasks', { data: { title } });
+  await page.goto('/');
+  const task = page.locator('#tasks li', { hasText: title });
+  const onServer = async () => (await (await page.request.get('/api/tasks')).json())
+    .some((t: { title: string }) => t.title === title);
+
+  await task.hover();
+  await task.getByRole('button', { name: `Удалить задачу: ${title}` }).click();
+  await expect(task).toHaveCount(0);
+  await expect(page.locator('#toast-text')).toContainText(title);
+  await page.getByRole('button', { name: 'Вернуть' }).click();
+  await expect(task).toBeVisible();
+  expect(await onServer()).toBe(true);
+
+  await task.hover();
+  await task.getByRole('button', { name: `Удалить задачу: ${title}` }).click();
+  await expect(task).toHaveCount(0);
+  await expect.poll(onServer, { timeout: 10_000 }).toBe(false);
+  await expect(page.locator('#toast')).not.toHaveAttribute('data-open');
+});
+
+test('the engine name lists the search prefixes', async ({ page }) => {
+  await page.goto('/');
+  const q = page.locator('#q');
+  await q.fill('погода');
+  await page.locator('#engine-hint').click();
+  await page.locator('#prefixes button', { hasText: 'Яндекс' }).click();
+  await expect(q).toHaveValue('y погода');
+  await expect(q).toBeFocused();
+  await expect(page.locator('#engine-hint')).toHaveText('Яндекс');
+  await expect(page.locator('#prefixes')).toBeHidden();
+});
