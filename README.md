@@ -43,6 +43,8 @@ are visible to Google.
 - **Tasks and notes**: a to-do list and a scratchpad that saves itself as you type.
 - **Service monitor**: background prober with latency, last error and 24h uptime per service,
   plus optional Telegram alerts when a service goes down or comes back.
+- **Morning digest**: with the Telegram bot set, one message a day (08:00 Moscow time by
+  default): the weather, today's events, the CBR rates and any service that is down.
 - **Single-user login**: password, server-side sessions, rate-limited.
 - **Demo mode**: a public read-only instance with no login, for showing the project.
 - **Chrome extension**: makes every new tab open the start page.
@@ -63,7 +65,8 @@ internal/calendar        iCalendar feeds: download, parse, expand recurrences in
 internal/suggest         search suggestions client (Google → DuckDuckGo fallback)
 internal/art             painting of the day: Cleveland Museum of Art Open Access client + daily holder
 internal/monitor         ticker-driven prober with a bounded worker pool, down/up alerts
-internal/telegram        Telegram Bot API client for the alerts
+internal/telegram        Telegram Bot API client for the alerts and the digest
+internal/digest          the morning digest: schedule and message
 internal/demo            monitor targets seeded into an empty demo database
 internal/store           domain types
 internal/store/postgres  pgx/v5 store, embedded SQL migrations
@@ -285,6 +288,8 @@ make run-demo   # the same, in read-only demo mode
 | `STARTPAGE_MONITOR_INTERVAL` | `1m` | probe interval (min `5s`) |
 | `TELEGRAM_BOT_TOKEN` | (none) | bot token from @BotFather; enables monitor alerts |
 | `TELEGRAM_CHAT_ID` | (none) | chat to alert, set together with the token |
+| `STARTPAGE_DIGEST_AT` | `08:00` | morning digest time (`HH:MM`), or `off`; only with the bot set |
+| `STARTPAGE_DIGEST_TZ` | `Europe/Moscow` | time zone of `STARTPAGE_DIGEST_AT` |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
 ### On a server

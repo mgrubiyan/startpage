@@ -105,6 +105,11 @@ Optional: the personal instance can message you when a monitored service goes do
    docker compose logs startpage | grep -i telegram   # "monitor alerts go to Telegram"
    ```
 
+With the bot set, a morning digest also goes to the chat at 08:00 Moscow time: the weather,
+today's events, the CBR rates and any service that is down. Change the time with
+`STARTPAGE_DIGEST_AT=07:30` (or `off`) and the zone with `STARTPAGE_DIGEST_TZ` in `.env`;
+the log says `morning digest scheduled` with both.
+
 To test it, add a service with a URL that doesn't answer. The alert arrives after two probe
 intervals. A group chat works too: add the bot to the group and use the group's (negative) id.
 

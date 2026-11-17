@@ -102,9 +102,35 @@ func TestTelegram(t *testing.T) {
 	if err != nil || cfg.TelegramToken != "" || cfg.TelegramChatID != "" {
 		t.Fatalf("unset: cfg %+v, err %v; alerts must be off by default", cfg, err)
 	}
+	if cfg.DigestAt != -1 {
+		t.Errorf("no Telegram, yet a digest at %d", cfg.DigestAt)
+	}
 	cfg, err = Load(env(base(map[string]string{"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "-1001234"})))
 	if err != nil || cfg.TelegramToken != token || cfg.TelegramChatID != "-1001234" {
 		t.Fatalf("both set: cfg %+v, err %v", cfg, err)
+	}
+	// With Telegram the digest is on: 08:00 Moscow time unless told otherwise.
+	if cfg.DigestAt != 8*60 || cfg.DigestZone == nil || cfg.DigestZone.String() != "Europe/Moscow" {
+		t.Errorf("digest default: at %d in %v", cfg.DigestAt, cfg.DigestZone)
+	}
+	tg := func(extra map[string]string) map[string]string {
+		m := map[string]string{"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "42"}
+		for k, v := range extra {
+			m[k] = v
+		}
+		return m
+	}
+	if cfg, err = Load(env(base(tg(map[string]string{"STARTPAGE_DIGEST_AT": "07:30", "STARTPAGE_DIGEST_TZ": "Asia/Yekaterinburg"})))); err != nil ||
+		cfg.DigestAt != 7*60+30 || cfg.DigestZone.String() != "Asia/Yekaterinburg" {
+		t.Errorf("digest set: at %d in %v, err %v", cfg.DigestAt, cfg.DigestZone, err)
+	}
+	if cfg, err = Load(env(base(tg(map[string]string{"STARTPAGE_DIGEST_AT": "off"})))); err != nil || cfg.DigestAt != -1 {
+		t.Errorf("digest off: at %d, err %v", cfg.DigestAt, err)
+	}
+	for _, bad := range []map[string]string{{"STARTPAGE_DIGEST_AT": "8"}, {"STARTPAGE_DIGEST_AT": "25:00"}, {"STARTPAGE_DIGEST_TZ": "Mars/Base"}} {
+		if _, err := Load(env(base(tg(bad)))); err == nil || !strings.Contains(err.Error(), "STARTPAGE_DIGEST_") {
+			t.Errorf("%v: err = %v", bad, err)
+		}
 	}
 
 	for name, tc := range map[string]struct {

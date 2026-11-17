@@ -25,6 +25,10 @@ type Config struct {
 	// Telegram alerts from the monitor; both empty means no alerts.
 	TelegramToken  string
 	TelegramChatID string
+	// DigestAt is when the morning digest goes to the same chat, in minutes
+	// after midnight in DigestZone; -1 when it's off (always without Telegram).
+	DigestAt   int
+	DigestZone *time.Location
 }
 
 // telegramToken is the shape of a token from @BotFather: "<bot id>:<secret>".
@@ -90,6 +94,16 @@ func Load(getenv func(string) string) (Config, error) {
 		errs = append(errs, errors.New("TELEGRAM_BOT_TOKEN doesn't look like a token from @BotFather (digits:secret)"))
 	}
 
+	cfg.DigestAt = -1
+	if cfg.TelegramToken != "" {
+		if cfg.DigestAt, err = parseClock(withDefault(getenv("STARTPAGE_DIGEST_AT"), "08:00")); err != nil {
+			errs = append(errs, fmt.Errorf("STARTPAGE_DIGEST_AT: %w", err))
+		}
+		if cfg.DigestZone, err = time.LoadLocation(withDefault(getenv("STARTPAGE_DIGEST_TZ"), "Europe/Moscow")); err != nil {
+			errs = append(errs, fmt.Errorf("STARTPAGE_DIGEST_TZ: %w", err))
+		}
+	}
+
 	if err = cfg.LogLevel.UnmarshalText([]byte(withDefault(getenv("LOG_LEVEL"), "info"))); err != nil {
 		errs = append(errs, fmt.Errorf("LOG_LEVEL: %w", err))
 	}
@@ -98,6 +112,18 @@ func Load(getenv func(string) string) (Config, error) {
 		return Config{}, errors.Join(errs...)
 	}
 	return cfg, nil
+}
+
+// parseClock reads "HH:MM" as minutes after midnight, or "off" as -1.
+func parseClock(raw string) (int, error) {
+	if raw == "off" {
+		return -1, nil
+	}
+	t, err := time.Parse("15:04", raw)
+	if err != nil {
+		return 0, fmt.Errorf("want HH:MM or off, got %q", raw)
+	}
+	return t.Hour()*60 + t.Minute(), nil
 }
 
 func withDefault(v, def string) string {
