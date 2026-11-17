@@ -42,12 +42,13 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
-          # golangci-lint v2.13.2 needs Go >= 1.26 to build (go install below). A newer
-          # toolchain lints this go 1.25 module the same way the prebuilt binary did.
-          go-version: "1.26.x"
+          # golangci-lint is built with `go install` below, and must be built with a Go
+          # at least as new as the module's. Older linters can't read Go 1.27 export
+          # data (v2.13.2 fails with "export data version 5"); v2.15.0 can.
+          go-version: "1.27.x"
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.13.2
+          version: v2.15.0
           # Build the linter with `go install` through the Go module proxy instead of
           # downloading the release binary from GitHub Releases. lint is a required
           # check on main, so a Releases outage (504s on 2026-11-08) must not block merges.
