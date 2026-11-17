@@ -25,7 +25,9 @@ type Deps struct {
 	Stocks MarketSource
 	// Catalog lists the coins and shares to pick from; nil turns the picker off.
 	Catalog CatalogSource
-	Auth    Authenticator
+	// Calendar loads the feeds listed in the settings; nil hides the panel.
+	Calendar CalendarSource
+	Auth     Authenticator
 	// LoginLimiter throttles POST /api/login per client IP.
 	LoginLimiter RateLimiter
 	// SecureCookie sets the Secure flag on the session cookie (enable behind HTTPS).
@@ -81,6 +83,7 @@ func (a *api) routes() []route {
 		{"GET /api/suggest", a.getSuggestions, false},
 		{"GET /api/markets", a.getMarkets, false},
 		{"GET /api/markets/catalog", a.getMarketCatalog, false},
+		{"GET /api/calendar", a.getCalendar, false},
 		{"GET /api/art", a.getArt, false},
 		{"GET /api/art/image", a.getArtImage, false},
 	}
@@ -100,6 +103,7 @@ func New(d Deps) http.Handler {
 		crypto:            d.Crypto,
 		stocks:            d.Stocks,
 		catalog:           d.Catalog,
+		calendars:         d.Calendar,
 		auth:              d.Auth,
 		limiter:           d.LoginLimiter,
 		secureCookie:      d.SecureCookie,

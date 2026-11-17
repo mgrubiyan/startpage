@@ -113,3 +113,35 @@ test('coins are picked from the exchange list, and bookmarks open in a new tab',
   expect(saved.crypto).toEqual(['ETH', 'SOL', 'TON', 'DOGE']);
   expect(saved.shares).toContain('VTBR');
 });
+
+// A calendar link is read access to the calendar: it goes to the server and
+// never comes back, neither in the settings nor in the browser's storage.
+test('a calendar link is saved write-only and can be disconnected', async ({ page }) => {
+  // Port 1 refuses at once: the feed fails without reaching the internet.
+  const link = 'webcal://127.0.0.1:1/published/2/e2e-secret-token';
+  await page.goto('/');
+  const board = page.locator('#calendar-board');
+  await expect(board).toBeHidden();
+
+  await page.locator('#settings-toggle').click();
+  await page.locator('#set-calendars').fill(link);
+  await page.locator('#settings button[type=submit]').click();
+  await expect(page.locator('#set-status')).toHaveText('Сохранено');
+  await expect(page.locator('#set-calendars')).toHaveValue('');
+  await expect(page.locator('#set-calendars-hint')).toContainText('Подключено: 1');
+
+  // The link is saved, so a failed load shows instead of an empty panel.
+  await expect(board).toBeVisible();
+  await expect(page.locator('#calendar')).toContainText('Календарь не загрузился');
+
+  const settings = await (await page.request.get('/api/settings')).text();
+  expect(settings).toContain('"calendars":1');
+  expect(settings).not.toContain('e2e-secret-token');
+  const kept = await page.evaluate(() => JSON.stringify({ ...localStorage }));
+  expect(kept).not.toContain('e2e-secret-token');
+
+  await page.locator('#set-calendars-off').click();
+  await expect(page.locator('#set-status')).toHaveText('Календари отключены');
+  await expect(board).toBeHidden();
+  await expect(page.locator('#set-calendars-off')).toBeHidden();
+});
