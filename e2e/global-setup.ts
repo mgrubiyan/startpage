@@ -15,6 +15,10 @@ export default async function globalSetup() {
     await api.delete(`/api/bookmarks/${b.id}`);
   }
   await api.put('/api/note', { data: { text: '' } });
+  const settings = await (await api.get('/api/settings')).json();
+  await api.put('/api/settings', {
+    data: { ...settings, crypto: ['BTC', 'ETH', 'SOL', 'TON'], shares: ['SBER', 'GAZP', 'LKOH', 'YDEX'] },
+  });
 
   await api.storageState({ path: stateFile });
   await api.dispose();

@@ -142,6 +142,16 @@ func run() error {
 			return markets.NewMOEX(upstream, markets.DefaultIndex, markets.Shares(tickers(key))).Board(ctx)
 		}, cache.WithLoadTimeout(8*time.Second), cache.WithMaxEntries(4))
 	}
+	// What there is to pick from changes slowly: a listing now and then.
+	var catalog httpapi.CatalogSource
+	if !cfg.Demo {
+		catalog = cache.New(12*time.Hour, func(ctx context.Context, board string) ([]markets.Listing, error) {
+			if board == "crypto" {
+				return markets.BinanceCoins(ctx, upstream)
+			}
+			return markets.MOEXShares(ctx, upstream)
+		}, cache.WithLoadTimeout(9*time.Second), cache.WithMaxEntries(2))
+	}
 	artwork := art.NewDaily(art.New(&http.Client{Timeout: 30 * time.Second}).Pick)
 	go func() {
 		// Load ahead of visitors, at startup and soon after each UTC midnight,
@@ -173,6 +183,7 @@ func run() error {
 		Art:               artwork,
 		Crypto:            cryptoBoard,
 		Stocks:            stocksBoard,
+		Catalog:           catalog,
 		Auth:              authService,
 		LoginLimiter:      auth.NewLimiter(5, time.Minute),
 		SecureCookie:      cfg.SecureCookie,

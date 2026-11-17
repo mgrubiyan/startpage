@@ -72,3 +72,44 @@ test('a new tab opens from the last answers, before the API replies', async ({ p
   await expect(page.locator('#tasks .title').first()).toBeVisible({ timeout: 1000 });
   release();
 });
+
+test('coins are picked from the exchange list, and bookmarks open in a new tab', async ({ page }) => {
+  // The exchanges' lists, stood in for: CI has no business with Binance.
+  await page.route('**/api/markets/catalog', (route) => route.fulfill({
+    json: {
+      available: true,
+      crypto: { items: [{ symbol: 'BTC', name: 'Bitcoin' }, { symbol: 'DOGE', name: 'Dogecoin' }, { symbol: 'DOT', name: 'Polkadot' }] },
+      shares: { items: [], error: 'список недоступен' },
+    },
+  }));
+  await page.request.post('/api/bookmarks', { data: { title: 'Вкладка', url: 'https://example.com' } });
+  await page.goto('/');
+
+  const link = page.locator('#bookmarks a', { hasText: 'Вкладка' });
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(link).toHaveAttribute('rel', /noopener/);
+
+  await page.locator('#markets-edit').click();
+  const coins = page.getByRole('combobox', { name: 'Криптовалюты: добавить' });
+  await expect(coins).toBeFocused();
+  await coins.fill('dog');
+  await expect(page.getByRole('option')).toHaveText(['DOGEDogecoin']);
+  await coins.press('Enter');
+
+  const picked = page.locator('#markets-picker .picked').first();
+  await expect(picked).toContainText('DOGE');
+  await expect(coins).toBeFocused(); // keeps typing after a pick
+  await page.getByRole('button', { name: 'Убрать BTC' }).click();
+  await expect(picked).not.toContainText('BTC');
+
+  // The shares list didn't load: a ticker typed in full still goes in.
+  const shares = page.getByRole('combobox', { name: 'Акции: добавить' });
+  await expect(page.locator('#markets-picker .pick-note').nth(1)).toContainText('вручную');
+  await shares.fill('vtbr');
+  await shares.press('Enter');
+  await expect(page.locator('#markets-picker .picked').nth(1)).toContainText('VTBR');
+
+  const saved = await (await page.request.get('/api/settings')).json();
+  expect(saved.crypto).toEqual(['ETH', 'SOL', 'TON', 'DOGE']);
+  expect(saved.shares).toContain('VTBR');
+});

@@ -182,6 +182,7 @@ type api struct {
 	art     ArtSource
 	crypto  MarketSource
 	stocks  MarketSource
+	catalog CatalogSource
 	auth    Authenticator
 	limiter RateLimiter
 	logger  *slog.Logger

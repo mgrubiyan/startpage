@@ -397,6 +397,85 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .forecast .temps { font-size: 12px; }
 }
 
+/* ---------- markets picker ---------- */
+.picker { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 14px; }
+@media (max-width: 640px) { .picker { grid-template-columns: 1fr; } }
+.pick { min-width: 0; padding: 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); }
+/* Each card is its own stacking context over the painting (backdrop blur), so the
+   one being typed in is lifted for its dropdown to cover the card below. */
+.pick:focus-within { position: relative; z-index: 2; }
+.pick h3 { margin: 0 0 8px; font-size: 12px; font-weight: 500; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.picked { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; min-height: 30px; }
+.picked li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 13px;
+  max-width: 100%;
+}
+.picked li.empty { padding: 4px 0; border: 0; background: none; color: var(--muted); }
+.picked .sym { font-weight: 600; }
+.picked .name { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.picked button {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 22px;
+  cursor: pointer;
+  transition: transform 160ms var(--ease-out);
+}
+.picked button:active { transform: scale(.9); }
+@media (hover: hover) and (pointer: fine) {
+  .picked button:hover { color: var(--danger); background: var(--surface); }
+}
+.pick-search { position: relative; }
+.pick-search input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  outline: none;
+}
+.pick-search input:focus { border-color: var(--accent); }
+.pick-search input:disabled { opacity: .6; }
+.pick-options {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 10;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+.pick-options li { display: flex; gap: 8px; align-items: baseline; padding: 7px 10px; border-radius: 8px; cursor: pointer; }
+.pick-options li[aria-selected="true"] { background: var(--bg); }
+@media (hover: hover) and (pointer: fine) { .pick-options li:hover { background: var(--bg); } }
+.pick-options .sym { font-weight: 600; flex: none; }
+.pick-options .name { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pick-note { margin: 6px 2px 0; font-size: 12px; color: var(--muted); min-height: 1.3em; }
+.pick-note.error { color: var(--danger); }
+/* Over the painting the dropdown needs a solid backing to stay readable. */
+.has-art .pick-options { background: rgb(22, 22, 26); }
+.has-art :is(.pick-options li[aria-selected="true"], .picked li) { background: rgba(255, 255, 255, .08); }
+
 /* ---------- markets ---------- */
 .markets { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
 @media (max-width: 640px) { .markets { grid-template-columns: 1fr; } }
@@ -492,7 +571,7 @@ body.has-art {
 }
 .has-art :is(.chip, .search input, .suggestions, .bookmarks a, .services li, .demo-banner,
   .inline-form input, .settings input, .settings select, .login-card, .ghost:hover, .ghost[aria-pressed="true"],
-  .tasks li, .task-form input, .note, .forecast li, .quotes li) {
+  .tasks li, .task-form input, .note, .forecast li, .quotes li, .pick, .pick-search input) {
   /* 12px reads the same as more and costs far less with dozens of tiles on a phone. */
   -webkit-backdrop-filter: blur(12px) saturate(150%);
   backdrop-filter: blur(12px) saturate(150%);

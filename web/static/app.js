@@ -310,6 +310,199 @@ async function loadMarkets() {
   }
 }
 
+// ---------- markets picker ----------
+// Which coins and shares the panel shows, picked from what the exchanges list.
+// Every change saves at once; the other board's list is left out of the save,
+// so it is kept.
+const BOARDS = [
+  { key: 'crypto', title: 'Криптовалюты', source: 'Binance', placeholder: 'Найти: BTC, Solana…', re: /^[A-Z0-9]{2,10}$/ },
+  { key: 'shares', title: 'Акции', source: 'Мосбиржа', placeholder: 'Найти: SBER, Яндекс…', re: /^[A-Z0-9]{1,12}$/ },
+];
+const MAX_TICKERS = 8;
+const MAX_OPTIONS = 8;
+let catalog = null; // { crypto: { items, error }, shares: {…} } once loaded
+let catalogLoading = null;
+
+async function loadCatalog() {
+  if (catalog) return catalog;
+  if (!catalogLoading) {
+    catalogLoading = api('/api/markets/catalog')
+      .then((c) => { if (c.available) catalog = c; return c; })
+      .finally(() => { catalogLoading = null; });
+  }
+  return catalogLoading;
+}
+
+const nameOf = (board, symbol) => {
+  const hit = catalog && catalog[board] && catalog[board].items.find((i) => i.symbol === symbol);
+  return hit && hit.name !== symbol ? hit.name : '';
+};
+
+// Best matches first: ticker prefix, name prefix, then anywhere; within a
+// rank, the exchange's own order (most traded first).
+function matches(board, query, taken) {
+  const items = (catalog && catalog[board] && catalog[board].items) || [];
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const ranked = [[], [], [], []];
+  for (const it of items) {
+    if (taken.includes(it.symbol)) continue;
+    const s = it.symbol.toLowerCase();
+    const n = it.name.toLowerCase();
+    if (s.startsWith(q)) ranked[0].push(it);
+    else if (n.startsWith(q) || n.includes(' ' + q)) ranked[1].push(it);
+    else if (s.includes(q)) ranked[2].push(it);
+    else if (n.includes(q)) ranked[3].push(it);
+    if (ranked[0].length >= MAX_OPTIONS) break;
+  }
+  return ranked.flat().slice(0, MAX_OPTIONS);
+}
+
+async function saveTickers(board, list, note) {
+  const { searchEngine, city } = state.settings;
+  note.className = 'pick-note';
+  note.textContent = 'сохраняю…';
+  try {
+    state.settings = await api('/api/settings', { method: 'PUT', body: { searchEngine, city, [board]: list } });
+    remember('settings', state.settings);
+    note.textContent = '';
+    loadMarkets();
+  } catch (e) {
+    if (ignorable(e)) return;
+    note.className = 'pick-note error';
+    note.textContent = 'Не сохранилось: ' + e.message;
+    return; // keep the message: a redraw would wipe it
+  }
+  renderPicker();
+}
+
+function pickBoard(b) {
+  const list = state.settings[b.key] || [];
+  const box = el('section', 'pick');
+  const head = el('h3');
+  head.append(el('span', null, b.title), el('span', null, `${list.length} из ${MAX_TICKERS} · ${b.source}`));
+  const note = el('p', 'pick-note');
+
+  const picked = el('ul', 'picked');
+  if (!list.length) picked.append(el('li', 'empty', b.key === 'shares' ? 'Только индекс' : 'Не показывать'));
+  list.forEach((sym) => {
+    const li = el('li');
+    const name = nameOf(b.key, sym);
+    li.title = name || sym;
+    li.append(el('span', 'sym', sym));
+    if (name) li.append(el('span', 'name', name));
+    const rm = el('button', null, '×');
+    rm.type = 'button';
+    rm.setAttribute('aria-label', 'Убрать ' + sym);
+    rm.addEventListener('click', () => saveTickers(b.key, list.filter((s) => s !== sym), note));
+    li.append(rm);
+    picked.append(li);
+  });
+
+  const search = el('div', 'pick-search');
+  const input = el('input');
+  input.type = 'text';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.setAttribute('autocapitalize', 'characters');
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-expanded', 'false');
+  input.setAttribute('aria-label', b.title + ': добавить');
+  const full = list.length >= MAX_TICKERS;
+  input.disabled = full;
+  input.placeholder = full ? `Уже ${MAX_TICKERS}: уберите одну, чтобы добавить` : b.placeholder;
+  const options = el('ul', 'pick-options');
+  options.id = 'pick-options-' + b.key;
+  options.setAttribute('role', 'listbox');
+  options.hidden = true;
+  input.setAttribute('aria-controls', options.id);
+  search.append(input, options);
+
+  const cat = catalog && catalog[b.key];
+  if (cat && cat.error) note.textContent = `Список ${b.source} недоступен: тикер можно вписать вручную и нажать Enter.`;
+
+  let shown = [];
+  let active = -1;
+  const close = () => { options.hidden = true; input.setAttribute('aria-expanded', 'false'); active = -1; };
+  const mark = (i) => {
+    active = i;
+    [...options.children].forEach((li, j) => li.setAttribute('aria-selected', String(j === i)));
+    if (i >= 0) options.children[i].scrollIntoView({ block: 'nearest' });
+  };
+  const add = (sym) => {
+    if (list.includes(sym) || list.length >= MAX_TICKERS) return;
+    close();
+    saveTickers(b.key, [...list, sym], note);
+  };
+  const update = () => {
+    shown = matches(b.key, input.value, list);
+    options.textContent = '';
+    shown.forEach((it, i) => {
+      const li = el('li');
+      li.setAttribute('role', 'option');
+      li.append(el('span', 'sym', it.symbol));
+      if (it.name !== it.symbol) li.append(el('span', 'name', it.name));
+      // mousedown, not click: the input keeps focus and doesn't close the list first.
+      li.addEventListener('mousedown', (e) => { e.preventDefault(); add(it.symbol); });
+      li.addEventListener('mousemove', () => { if (active !== i) mark(i); });
+      options.append(li);
+    });
+    options.hidden = !shown.length;
+    input.setAttribute('aria-expanded', String(!!shown.length));
+    mark(shown.length ? 0 : -1);
+  };
+  input.addEventListener('input', update);
+  input.addEventListener('blur', close);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' && shown.length) { e.preventDefault(); mark((active + 1) % shown.length); }
+    else if (e.key === 'ArrowUp' && shown.length) { e.preventDefault(); mark((active - 1 + shown.length) % shown.length); }
+    else if (e.key === 'Escape') { close(); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (active >= 0 && !options.hidden) { add(shown[active].symbol); return; }
+      // Not in the list (or the list didn't load): take it as typed, the
+      // board will say if the exchange doesn't know it.
+      const raw = input.value.trim().toUpperCase();
+      if (b.re.test(raw)) add(raw);
+      else if (raw) { note.className = 'pick-note error'; note.textContent = `«${input.value.trim()}» не похоже на тикер`; }
+    }
+  });
+
+  box.append(head, picked, search, note);
+  return { box, input };
+}
+
+function renderPicker() {
+  const root = $('markets-picker');
+  if (root.hidden) return;
+  // Redrawn after every change: keep typing where the user was.
+  const focused = root.contains(document.activeElement) ? document.activeElement.getAttribute('aria-label') : null;
+  root.textContent = '';
+  BOARDS.forEach((b) => {
+    const { box, input } = pickBoard(b);
+    root.append(box);
+    if (focused && input.getAttribute('aria-label') === focused && !input.disabled) input.focus();
+  });
+}
+
+$('markets-edit').addEventListener('click', async (e) => {
+  const button = e.currentTarget;
+  const root = $('markets-picker');
+  root.hidden = !root.hidden;
+  button.setAttribute('aria-pressed', String(!root.hidden));
+  button.textContent = root.hidden ? 'Изменить' : 'Готово';
+  if (root.hidden) return;
+  renderPicker();
+  root.querySelector('input:not(:disabled)')?.focus();
+  try {
+    await loadCatalog();
+  } catch (err) {
+    if (ignorable(err)) return;
+  }
+  renderPicker(); // names and suggestions, now that the lists are here
+});
+
 // ---------- rates ----------
 function renderRates(r) {
   const box = $('rates-value');
@@ -348,6 +541,8 @@ function bookmarkTile(bm) {
   const li = el('li');
   const a = el('a');
   a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
   const icon = el('span', 'icon', (bm.title || host).trim().charAt(0).toUpperCase());
   icon.style.background = `hsl(${hue(host)} 55% 50%)`;
   const img = el('img');
@@ -541,18 +736,9 @@ $('settings-toggle').addEventListener('click', (e) => {
   if (!form.hidden) {
     $('set-engine').value = state.settings.searchEngine;
     $('set-city').value = state.settings.city;
-    // Settings kept by an older page have no lists. Their fields stay hidden
-    // then, and the lists are left out of the save, so they aren't cleared.
-    const { crypto, shares } = state.settings;
-    $('set-crypto-label').hidden = !Array.isArray(crypto);
-    $('set-shares-label').hidden = !Array.isArray(shares);
-    $('set-crypto').value = (crypto || []).join(' ');
-    $('set-shares').value = (shares || []).join(' ');
     $('set-status').textContent = '';
   }
 });
-
-const tickerList = (s) => s.split(/[\s,;]+/).filter(Boolean);
 
 $('settings').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -560,17 +746,10 @@ $('settings').addEventListener('submit', async (e) => {
   try {
     const cityChanged = $('set-city').value.trim() !== state.settings.city;
     const body = { searchEngine: $('set-engine').value, city: $('set-city').value };
-    if (!$('set-crypto-label').hidden) body.crypto = tickerList($('set-crypto').value);
-    if (!$('set-shares-label').hidden) body.shares = tickerList($('set-shares').value);
-    const before = JSON.stringify([state.settings.crypto, state.settings.shares]);
     state.settings = await api('/api/settings', { method: 'PUT', body });
     remember('settings', state.settings);
     updateHint();
     if (cityChanged) loadWeather();
-    if (JSON.stringify([state.settings.crypto, state.settings.shares]) !== before) loadMarkets();
-    // Show the lists as the server cleaned them: upper case, no repeats.
-    $('set-crypto').value = (state.settings.crypto || []).join(' ');
-    $('set-shares').value = (state.settings.shares || []).join(' ');
     status.textContent = 'Сохранено';
   } catch (ex) {
     if (!ignorable(ex)) status.textContent = ex.message;
