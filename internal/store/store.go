@@ -10,6 +10,10 @@ import (
 // ErrNotFound is returned when a row addressed by ID does not exist.
 var ErrNotFound = errors.New("not found")
 
+// ErrConflict is returned when a write was based on a list that has changed
+// since, e.g. a new order for bookmarks that another tab added to or removed.
+var ErrConflict = errors.New("conflict")
+
 // Settings is the single-row user configuration.
 type Settings struct {
 	SearchEngine string

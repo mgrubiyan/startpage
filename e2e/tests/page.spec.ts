@@ -193,6 +193,40 @@ test('the engine name lists the search prefixes', async ({ page }) => {
   await expect(page.locator('#prefixes')).toBeHidden();
 });
 
+test('bookmarks are put in order by dragging, or with Alt+arrows', async ({ page }) => {
+  const tag = Date.now();
+  const names = ['Альфа', 'Бета', 'Гамма'].map((n) => `${n} ${tag}`);
+  for (const title of names) await page.request.post('/api/bookmarks', { data: { title, url: 'https://example.com' } });
+  const order = async () => (await (await page.request.get('/api/bookmarks')).json())
+    .map((b: { title: string }) => b.title).filter((t: string) => t.endsWith(String(tag)));
+  const tile = (i: number) => page.locator('#bookmarks li', { hasText: names[i] });
+
+  await page.goto('/');
+  await page.locator('#edit-toggle').click();
+
+  // Drag Альфа onto Гамма: it takes Гамма's place, the others make way.
+  const from = await tile(0).boundingBox();
+  const to = await tile(2).boundingBox();
+  if (!from || !to) throw new Error('no tiles');
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 });
+  await page.mouse.up();
+  await expect.poll(order).toEqual([names[1], names[2], names[0]]);
+  await expect(page).toHaveURL(/\/$/); // the drag didn't open the link
+
+  // From the keyboard: Alt+← moves it back one place.
+  await tile(0).locator('a').focus();
+  await page.keyboard.press('Alt+ArrowLeft');
+  await expect.poll(order).toEqual([names[1], names[0], names[2]]);
+  await expect(tile(0).locator('a')).toBeFocused();
+
+  // And it stays so after a reload.
+  await page.reload();
+  const shown = await page.locator('#bookmarks li .label').allTextContents();
+  expect(shown.filter((t) => t.endsWith(String(tag)))).toEqual([names[1], names[0], names[2]]);
+});
+
 test('the line under the date names the next event today and likely rain', async ({ page }) => {
   const now = Date.now();
   const iso = (ms: number) => new Date(ms).toISOString();

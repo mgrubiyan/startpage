@@ -38,6 +38,54 @@ func (s *Store) AddBookmark(ctx context.Context, b store.Bookmark) (store.Bookma
 	return out, nil
 }
 
+// ReorderBookmarks puts the bookmarks in the order of ids, which must name
+// every bookmark exactly once: a list read before another tab added or removed
+// one gets ErrConflict, rather than leaving the new one wherever it falls.
+func (s *Store) ReorderBookmarks(ctx context.Context, ids []int64) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// FOR UPDATE: a concurrent reorder waits for this one instead of mixing with it.
+		rows, err := tx.Query(ctx, "SELECT id FROM bookmarks ORDER BY id FOR UPDATE")
+		if err != nil {
+			return fmt.Errorf("lock bookmarks: %w", err)
+		}
+		have, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+		if err != nil {
+			return fmt.Errorf("lock bookmarks: %w", err)
+		}
+		if !sameIDs(have, ids) {
+			return store.ErrConflict
+		}
+		_, err = tx.Exec(ctx, `
+			UPDATE bookmarks AS b SET position = o.n
+			FROM unnest($1::bigint[]) WITH ORDINALITY AS o(id, n)
+			WHERE b.id = o.id`, ids)
+		if err != nil {
+			return fmt.Errorf("reorder bookmarks: %w", err)
+		}
+		return nil
+	})
+}
+
+// sameIDs reports whether ids holds exactly the ids in have (sorted), once each.
+func sameIDs(have, ids []int64) bool {
+	if len(have) != len(ids) {
+		return false
+	}
+	seen := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			return false
+		}
+		seen[id] = true
+	}
+	for _, id := range have {
+		if !seen[id] {
+			return false
+		}
+	}
+	return true
+}
+
 // DeleteBookmark removes a bookmark by ID.
 func (s *Store) DeleteBookmark(ctx context.Context, id int64) error {
 	tag, err := s.pool.Exec(ctx, "DELETE FROM bookmarks WHERE id = $1", id)
