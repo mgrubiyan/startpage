@@ -32,6 +32,12 @@ func NewClient() *http.Client {
 
 // JSON GETs rawURL and decodes at most 1 MiB of JSON into dst.
 func JSON(ctx context.Context, client *http.Client, rawURL string, dst any) error {
+	return JSONLimit(ctx, client, rawURL, dst, maxBodyBytes)
+}
+
+// JSONLimit is JSON with another body limit, for the rare large answer such as
+// a whole exchange's symbol list.
+func JSONLimit(ctx context.Context, client *http.Client, rawURL string, dst any, limit int64) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
@@ -50,7 +56,7 @@ func JSON(ctx context.Context, client *http.Client, rawURL string, dst any) erro
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 		return &StatusError{URL: req.URL.Redacted(), Code: resp.StatusCode}
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBodyBytes)).Decode(dst); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, limit)).Decode(dst); err != nil {
 		return fmt.Errorf("decode %s: %w", req.URL.Redacted(), err)
 	}
 	// Read any trailing bytes (e.g. a final newline) so the connection is reused.

@@ -59,14 +59,28 @@ func (f *fakeStore) Settings(context.Context) (store.Settings, error) {
 	return f.settings, f.failWith
 }
 
-func (f *fakeStore) UpdateSettings(_ context.Context, s store.Settings) (store.Settings, error) {
+func (f *fakeStore) UpdateSettings(_ context.Context, p store.SettingsPatch) (store.Settings, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failWith != nil {
 		return store.Settings{}, f.failWith
 	}
-	f.settings = s
-	return s, nil
+	set := func(dst *string, v *string) {
+		if v != nil {
+			*dst = *v
+		}
+	}
+	setList := func(dst *[]string, v *[]string) {
+		if v != nil {
+			*dst = append([]string{}, *v...)
+		}
+	}
+	set(&f.settings.SearchEngine, p.SearchEngine)
+	set(&f.settings.City, p.City)
+	setList(&f.settings.Crypto, p.Crypto)
+	setList(&f.settings.Shares, p.Shares)
+	setList(&f.settings.Calendars, p.Calendars)
+	return f.settings, nil
 }
 
 func (f *fakeStore) Bookmarks(context.Context) ([]store.Bookmark, error) {

@@ -137,16 +137,28 @@ func TestSettingsRoundTrip(t *testing.T) {
 		SearchEngine: "y", City: "Москва", Crypto: []string{"TON", "BTC"}, Shares: []string{"T"},
 		Calendars: []string{"https://p52-caldav.icloud.com/published/2/a", "https://example.com/b.ics"},
 	}
-	if got, err = s.UpdateSettings(ctx, want); err != nil || !reflect.DeepEqual(got, want) {
+	all := store.SettingsPatch{SearchEngine: &want.SearchEngine, City: &want.City,
+		Crypto: &want.Crypto, Shares: &want.Shares, Calendars: &want.Calendars}
+	if got, err = s.UpdateSettings(ctx, all); err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("UpdateSettings = %+v, %v", got, err)
 	}
 	if got, _ = s.Settings(ctx); !reflect.DeepEqual(got, want) {
 		t.Fatalf("after update = %+v", got)
 	}
-	// An emptied list is an empty array: pgx would send a nil slice as NULL,
-	// which the NOT NULL column refuses.
-	if got, err = s.UpdateSettings(ctx, store.Settings{SearchEngine: "y", City: "Москва"}); err != nil ||
-		len(got.Crypto) != 0 || got.Crypto == nil || len(got.Shares) != 0 || got.Calendars == nil || len(got.Calendars) != 0 {
+	// A patch keeps what it leaves out: one list saved after another keeps both.
+	shares := []string{"GAZP"}
+	if got, err = s.UpdateSettings(ctx, store.SettingsPatch{Shares: &shares}); err != nil {
+		t.Fatal(err)
+	}
+	want.Shares = shares
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("after a shares-only patch = %+v", got)
+	}
+	// An emptied list is an empty array, not NULL (which would keep the column).
+	var none []string
+	if got, err = s.UpdateSettings(ctx, store.SettingsPatch{Crypto: &none, Shares: &none, Calendars: &none}); err != nil ||
+		got.Crypto == nil || len(got.Crypto) != 0 || len(got.Shares) != 0 || got.Calendars == nil || len(got.Calendars) != 0 ||
+		got.City != "Москва" {
 		t.Fatalf("emptied lists = %+v, %v", got, err)
 	}
 }

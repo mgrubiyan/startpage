@@ -73,6 +73,59 @@ test('a new tab opens from the last answers, before the API replies', async ({ p
   release();
 });
 
+test('coins are picked from the exchange list, and bookmarks open in a new tab', async ({ page }) => {
+  // The exchanges' lists, stood in for: CI has no business with Binance.
+  // They're held back until something is typed, as a slow exchange would.
+  let release: () => void = () => {};
+  const listed = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/api/markets/catalog', async (route) => {
+    await listed;
+    await route.fulfill({ json: {
+      available: true,
+      crypto: { items: [{ symbol: 'BTC', name: 'Bitcoin' }, { symbol: 'DOGE', name: 'Dogecoin' }, { symbol: 'DOT', name: 'Polkadot' }] },
+      shares: { items: [], error: 'список недоступен' },
+    } });
+  });
+  // Its own starting point, so it can run again (--repeat-each) on its own data.
+  await page.request.put('/api/settings', {
+    data: { crypto: ['BTC', 'ETH', 'SOL', 'TON'], shares: ['SBER', 'GAZP', 'LKOH', 'YDEX'] },
+  });
+  const title = `Вкладка ${Date.now()}`;
+  await page.request.post('/api/bookmarks', { data: { title, url: 'https://example.com' } });
+  await page.goto('/');
+
+  const link = page.locator('#bookmarks a', { hasText: title });
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(link).toHaveAttribute('rel', /noopener/);
+
+  await page.locator('#markets-edit').click();
+  const coins = page.getByRole('combobox', { name: 'Криптовалюты: добавить' });
+  await expect(coins).toBeFocused();
+  await coins.fill('dog');
+  release(); // the lists arrive mid-word: what was typed stays, now with suggestions
+  await expect(coins).toHaveValue('dog');
+  await expect(page.getByRole('option')).toHaveText(['DOGEDogecoin']);
+  await coins.press('Enter');
+
+  const picked = page.locator('#markets-picker .picked').first();
+  await expect(picked).toContainText('DOGE');
+  await expect(coins).toBeFocused(); // keeps typing after a pick
+  await page.getByRole('button', { name: 'Убрать BTC' }).click();
+  await expect(picked).not.toContainText('BTC');
+
+  // The shares list didn't load: a ticker typed in full still goes in.
+  const shares = page.getByRole('combobox', { name: 'Акции: добавить' });
+  await expect(page.locator('#markets-picker .pick-note').nth(1)).toContainText('вручную');
+  await shares.fill('vtbr');
+  await shares.press('Enter');
+  await expect(page.locator('#markets-picker .picked').nth(1)).toContainText('VTBR');
+
+  // Chips show before their saves finish: wait for the server to have both.
+  const stored = async () => (await page.request.get('/api/settings')).json();
+  await expect.poll(async () => (await stored()).shares).toContain('VTBR');
+  await expect.poll(async () => (await stored()).crypto).toEqual(['ETH', 'SOL', 'TON', 'DOGE']);
+});
+
 // A calendar link is read access to the calendar: it goes to the server and
 // never comes back, neither in the settings nor in the browser's storage.
 test('a calendar link is saved write-only and can be disconnected', async ({ page }) => {

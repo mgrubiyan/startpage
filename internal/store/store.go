@@ -21,6 +21,14 @@ type Settings struct {
 	Calendars []string
 }
 
+// SettingsPatch changes the fields that are set and keeps the others. It is
+// applied in one statement, so two saves of different fields (the markets
+// picker saves one list at a time) can't undo each other.
+type SettingsPatch struct {
+	SearchEngine, City        *string
+	Crypto, Shares, Calendars *[]string
+}
+
 // Bookmark is a tile on the start page.
 type Bookmark struct {
 	ID    int64

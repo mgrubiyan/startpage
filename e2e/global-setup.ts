@@ -17,7 +17,10 @@ export default async function globalSetup() {
   await api.put('/api/note', { data: { text: '' } });
   const settings = await (await api.get('/api/settings')).json();
   await api.put('/api/settings', {
-    data: { searchEngine: settings.searchEngine, city: settings.city, calendars: [] },
+    data: {
+      searchEngine: settings.searchEngine, city: settings.city, calendars: [],
+      crypto: ['BTC', 'ETH', 'SOL', 'TON'], shares: ['SBER', 'GAZP', 'LKOH', 'YDEX'],
+    },
   });
 
   await api.storageState({ path: stateFile });

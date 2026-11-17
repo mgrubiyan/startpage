@@ -18,7 +18,7 @@ import (
 // Store is the persistence the API needs; *postgres.Store implements it.
 type Store interface {
 	Settings(ctx context.Context) (store.Settings, error)
-	UpdateSettings(ctx context.Context, s store.Settings) (store.Settings, error)
+	UpdateSettings(ctx context.Context, p store.SettingsPatch) (store.Settings, error)
 	Bookmarks(ctx context.Context) ([]store.Bookmark, error)
 	AddBookmark(ctx context.Context, b store.Bookmark) (store.Bookmark, error)
 	DeleteBookmark(ctx context.Context, id int64) error
@@ -67,13 +67,14 @@ func orEmpty(s []string) []string {
 	return s
 }
 
+// settingsInput is a patch: a field left out keeps its stored value. So a page
+// loaded before the lists existed can't clear them by saving the others, and
+// the markets picker saves one list without resending (stale) other fields.
 type settingsInput struct {
-	SearchEngine string `json:"searchEngine"`
-	City         string `json:"city"`
-	// A list left out keeps its stored value, so a page loaded before the
-	// lists existed can't clear them by saving the other settings.
-	Crypto *[]string `json:"crypto"`
-	Shares *[]string `json:"shares"`
+	SearchEngine *string   `json:"searchEngine"`
+	City         *string   `json:"city"`
+	Crypto       *[]string `json:"crypto"`
+	Shares       *[]string `json:"shares"`
 	// Calendars replaces the saved links when present; [] removes them all.
 	// The page can't show the saved ones, so it leaves this out to keep them.
 	Calendars *[]string `json:"calendars"`
@@ -192,6 +193,7 @@ type api struct {
 	art     ArtSource
 	crypto  MarketSource
 	stocks  MarketSource
+	catalog CatalogSource
 	// calendars is a field of its own: the links come from the settings per request.
 	calendars CalendarSource
 	auth      Authenticator
@@ -235,43 +237,43 @@ func (a *api) putSettings(w http.ResponseWriter, r *http.Request) {
 		badBody(w, err)
 		return
 	}
-	if !searchEngines[in.SearchEngine] {
-		writeError(w, http.StatusBadRequest, "searchEngine: unknown engine")
-		return
+	var p store.SettingsPatch
+	if in.SearchEngine != nil {
+		if !searchEngines[*in.SearchEngine] {
+			writeError(w, http.StatusBadRequest, "searchEngine: unknown engine")
+			return
+		}
+		p.SearchEngine = in.SearchEngine
 	}
-	city, err := cleanText(in.City, 60)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "city: "+err.Error())
-		return
-	}
-	next := store.Settings{SearchEngine: in.SearchEngine, City: city}
-	if in.Crypto == nil || in.Shares == nil || in.Calendars == nil {
-		cur, err := a.store.Settings(r.Context())
+	if in.City != nil {
+		city, err := cleanText(*in.City, 60)
 		if err != nil {
-			a.internalError(w, r, err)
+			writeError(w, http.StatusBadRequest, "city: "+err.Error())
 			return
 		}
-		next.Crypto, next.Shares, next.Calendars = cur.Crypto, cur.Shares, cur.Calendars
+		p.City = &city
 	}
-	if in.Crypto != nil {
-		if next.Crypto, err = cleanTickers(*in.Crypto, coinSymbol); err != nil {
-			writeError(w, http.StatusBadRequest, "crypto: "+err.Error())
+	for _, f := range []struct {
+		name string
+		in   *[]string
+		out  **[]string
+		cl   func([]string) ([]string, error)
+	}{
+		{"crypto", in.Crypto, &p.Crypto, func(l []string) ([]string, error) { return cleanTickers(l, coinSymbol) }},
+		{"shares", in.Shares, &p.Shares, func(l []string) ([]string, error) { return cleanTickers(l, shareTicker) }},
+		{"calendars", in.Calendars, &p.Calendars, cleanCalendars},
+	} {
+		if f.in == nil {
+			continue
+		}
+		l, err := f.cl(*f.in)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, f.name+": "+err.Error())
 			return
 		}
+		*f.out = &l
 	}
-	if in.Shares != nil {
-		if next.Shares, err = cleanTickers(*in.Shares, shareTicker); err != nil {
-			writeError(w, http.StatusBadRequest, "shares: "+err.Error())
-			return
-		}
-	}
-	if in.Calendars != nil {
-		if next.Calendars, err = cleanCalendars(*in.Calendars); err != nil {
-			writeError(w, http.StatusBadRequest, "calendars: "+err.Error())
-			return
-		}
-	}
-	saved, err := a.store.UpdateSettings(r.Context(), next)
+	saved, err := a.store.UpdateSettings(r.Context(), p)
 	if err != nil {
 		a.internalError(w, r, err)
 		return

@@ -310,6 +310,244 @@ async function loadMarkets() {
   }
 }
 
+// ---------- markets picker ----------
+// Which coins and shares the panel shows, picked from what the exchanges list.
+// Every change saves at once; the other board's list is left out of the save,
+// so it is kept.
+const BOARDS = [
+  { key: 'crypto', title: 'Криптовалюты', source: 'Binance', placeholder: 'Найти: BTC, Solana…', re: /^[A-Z0-9]{2,10}$/ },
+  { key: 'shares', title: 'Акции', source: 'Мосбиржа', placeholder: 'Найти: SBER, Яндекс…', re: /^[A-Z0-9]{1,12}$/ },
+];
+const MAX_TICKERS = 8;
+const MAX_OPTIONS = 8;
+let catalog = null; // { crypto: { items, error }, shares: {…} } once loaded
+let catalogLoading = null;
+let catalogFailed = false; // the last try to get the lists failed outright
+
+// Kept once both lists came; a list the server couldn't get is asked for
+// again the next time the picker opens.
+async function loadCatalog() {
+  if (catalog && !catalog.crypto?.error && !catalog.shares?.error) return catalog;
+  if (!catalogLoading) {
+    catalogLoading = api('/api/markets/catalog')
+      .then((c) => { catalogFailed = false; if (c.available) catalog = c; return c; })
+      .catch((e) => { if (!ignorable(e)) catalogFailed = true; throw e; })
+      .finally(() => { catalogLoading = null; });
+  }
+  return catalogLoading;
+}
+
+const nameOf = (board, symbol) => {
+  const hit = catalog && catalog[board] && catalog[board].items.find((i) => i.symbol === symbol);
+  return hit && hit.name !== symbol ? hit.name : '';
+};
+
+// Best matches first: the ticker itself, ticker prefix, name prefix, then
+// anywhere; within a rank, the exchange's own order (most traded first). So
+// "T" typed in full is T, not the busier TATN.
+function matches(board, query, taken) {
+  const items = (catalog && catalog[board] && catalog[board].items) || [];
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const ranked = [[], [], [], [], []];
+  for (const it of items) {
+    if (taken.includes(it.symbol)) continue;
+    const s = it.symbol.toLowerCase();
+    const n = it.name.toLowerCase();
+    if (s === q) ranked[0].push(it);
+    else if (s.startsWith(q)) ranked[1].push(it);
+    else if (n.startsWith(q) || n.includes(' ' + q)) ranked[2].push(it);
+    else if (s.includes(q)) ranked[3].push(it);
+    else if (n.includes(q)) ranked[4].push(it);
+  }
+  return ranked.flat().slice(0, MAX_OPTIONS);
+}
+
+let pickerError = null; // { board, text } of the last failed save, until the next change
+const pickerSaves = { crypto: 0, shares: 0 };
+
+// The chip shows at once and the save follows, with this board's list only:
+// the server keeps whatever a save leaves out. A board's later save carries
+// its earlier changes too, so only its latest answer counts; a failed one
+// puts the list back and says why.
+async function saveTickers(board, list) {
+  const before = state.settings[board];
+  const seq = ++pickerSaves[board];
+  pickerError = null;
+  state.settings = { ...state.settings, [board]: list };
+  renderPicker();
+  try {
+    const saved = await api('/api/settings', { method: 'PUT', body: { [board]: list } });
+    if (seq !== pickerSaves[board]) return;
+    // The other board's list stays as shown: its own saves answer for it.
+    const others = BOARDS.filter((x) => x.key !== board).map((x) => [x.key, state.settings[x.key]]);
+    state.settings = { ...saved, ...Object.fromEntries(others) };
+    remember('settings', state.settings);
+    loadMarkets();
+    // Already on screen as saved: a redraw would only reset the suggestions.
+    if (JSON.stringify(saved[board]) === JSON.stringify(list)) return;
+  } catch (e) {
+    if (ignorable(e) || seq !== pickerSaves[board]) return;
+    state.settings = { ...state.settings, [board]: before };
+    pickerError = { board, text: 'Не сохранилось: ' + e.message };
+  }
+  renderPicker();
+}
+
+function pickBoard(b) {
+  // Settings kept by a page from before the lists have none: unknown, not
+  // empty, so nothing is offered until the server's settings arrive.
+  const known = Array.isArray(state.settings[b.key]);
+  const list = known ? state.settings[b.key] : [];
+  const box = el('section', 'pick');
+  const head = el('h3');
+  head.append(el('span', null, b.title), el('span', null, `${list.length} из ${MAX_TICKERS} · ${b.source}`));
+  const note = el('p', 'pick-note');
+
+  const picked = el('ul', 'picked');
+  if (!known) picked.append(el('li', 'empty', 'Загружаю…'));
+  else if (!list.length) picked.append(el('li', 'empty', b.key === 'shares' ? 'Только индекс' : 'Не показывать'));
+  list.forEach((sym) => {
+    const li = el('li');
+    const name = nameOf(b.key, sym);
+    li.title = name || sym;
+    li.append(el('span', 'sym', sym));
+    if (name) li.append(el('span', 'name', name));
+    const rm = el('button', null, '×');
+    rm.type = 'button';
+    rm.setAttribute('aria-label', 'Убрать ' + sym);
+    rm.dataset.board = b.key;
+    rm.addEventListener('click', () => saveTickers(b.key, list.filter((s) => s !== sym)));
+    li.append(rm);
+    picked.append(li);
+  });
+
+  const search = el('div', 'pick-search');
+  const input = el('input');
+  input.type = 'text';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.setAttribute('autocapitalize', 'characters');
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-expanded', 'false');
+  input.setAttribute('aria-label', b.title + ': добавить');
+  input.dataset.board = b.key;
+  const full = list.length >= MAX_TICKERS;
+  input.disabled = full || !known;
+  input.placeholder = !known ? 'Загружаю…' : full ? `Уже ${MAX_TICKERS}: уберите одну, чтобы добавить` : b.placeholder;
+  const options = el('ul', 'pick-options');
+  options.id = 'pick-options-' + b.key;
+  options.setAttribute('role', 'listbox');
+  options.hidden = true;
+  input.setAttribute('aria-controls', options.id);
+  search.append(input, options);
+
+  const cat = catalog && catalog[b.key];
+  if (pickerError && pickerError.board === b.key) {
+    note.className = 'pick-note error';
+    note.textContent = pickerError.text;
+  } else if (cat && cat.error) {
+    note.textContent = `Список ${b.source} недоступен: тикер можно вписать вручную и нажать Enter.`;
+  } else if (!catalog && catalogFailed) {
+    note.textContent = 'Списки бирж не загрузились: тикер можно вписать вручную и нажать Enter.';
+  }
+
+  let shown = [];
+  let active = -1;
+  const close = () => { options.hidden = true; input.setAttribute('aria-expanded', 'false'); active = -1; };
+  const mark = (i) => {
+    active = i;
+    [...options.children].forEach((li, j) => li.setAttribute('aria-selected', String(j === i)));
+    if (i >= 0) options.children[i].scrollIntoView({ block: 'nearest' });
+  };
+  const add = (sym) => {
+    if (list.includes(sym) || list.length >= MAX_TICKERS) return;
+    close();
+    input.value = '';
+    saveTickers(b.key, [...list, sym]);
+  };
+  const update = () => {
+    shown = matches(b.key, input.value, list);
+    options.textContent = '';
+    shown.forEach((it, i) => {
+      const li = el('li');
+      li.setAttribute('role', 'option');
+      li.append(el('span', 'sym', it.symbol));
+      if (it.name !== it.symbol) li.append(el('span', 'name', it.name));
+      // mousedown, not click: the input keeps focus and doesn't close the list first.
+      li.addEventListener('mousedown', (e) => { e.preventDefault(); add(it.symbol); });
+      li.addEventListener('mousemove', () => { if (active !== i) mark(i); });
+      options.append(li);
+    });
+    options.hidden = !shown.length;
+    input.setAttribute('aria-expanded', String(!!shown.length));
+    mark(shown.length ? 0 : -1);
+  };
+  input.addEventListener('input', update);
+  input.addEventListener('blur', close);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' && shown.length) { e.preventDefault(); mark((active + 1) % shown.length); }
+    else if (e.key === 'ArrowUp' && shown.length) { e.preventDefault(); mark((active - 1 + shown.length) % shown.length); }
+    else if (e.key === 'Escape') { close(); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (active >= 0 && !options.hidden) { add(shown[active].symbol); return; }
+      // Not in the list (or the list didn't load): take it as typed, the
+      // board will say if the exchange doesn't know it.
+      const raw = input.value.trim().toUpperCase();
+      if (b.re.test(raw)) add(raw);
+      else if (raw) { note.className = 'pick-note error'; note.textContent = `«${input.value.trim()}» не похоже на тикер`; }
+    }
+  });
+
+  box.append(head, picked, search, note);
+  return { box, input };
+}
+
+function renderPicker() {
+  const root = $('markets-picker');
+  if (root.hidden) return;
+  // Redrawn after every change and once the lists arrive: the board being
+  // edited keeps the focus, in its search field with what was typed there
+  // (the lists may come in mid-word), or on its last chip once it's full.
+  const active = root.contains(document.activeElement) ? document.activeElement : null;
+  const focused = active && active.dataset.board;
+  const typed = active && active.tagName === 'INPUT' ? active.value : '';
+  root.textContent = '';
+  BOARDS.forEach((b) => {
+    const { box, input } = pickBoard(b);
+    root.append(box);
+    if (focused !== b.key) return;
+    if (input.disabled) {
+      box.querySelector('.picked li:last-child button')?.focus();
+      return;
+    }
+    input.focus();
+    if (typed) {
+      input.value = typed;
+      input.dispatchEvent(new Event('input')); // its suggestions, from the lists now here
+    }
+  });
+}
+
+$('markets-edit').addEventListener('click', async (e) => {
+  const button = e.currentTarget;
+  const root = $('markets-picker');
+  root.hidden = !root.hidden;
+  button.setAttribute('aria-pressed', String(!root.hidden));
+  button.textContent = root.hidden ? 'Изменить' : 'Готово';
+  if (root.hidden) return;
+  renderPicker();
+  root.querySelector('input:not(:disabled)')?.focus();
+  try {
+    await loadCatalog();
+  } catch (err) {
+    if (ignorable(err)) return;
+  }
+  renderPicker(); // names and suggestions, now that the lists are here
+});
+
 // ---------- calendar ----------
 // The browser's zone: the server cuts the days in it and puts all-day and
 // floating events into it, since it runs in a different zone than its user.
@@ -333,10 +571,13 @@ function agendaLabel(day, from) {
 }
 
 function agendaItem(e, day) {
-  const li = el('li', e.allDay ? 'all-day' : null);
+  const li = el('li');
   const what = el('span', 'what', e.title);
   const tip = [e.title];
   if (e.allDay) {
+    const when = el('span', 'when');
+    when.append(el('span', 'day-mark'), el('span', 'sr-only', 'весь день'));
+    li.append(when);
     const last = localDay(e.end);
     last.setDate(last.getDate() - 1); // the end date is exclusive
     if (isoDay(last) > day) what.append(el('span', 'where', 'до ' + shortDay(last)));
@@ -440,6 +681,8 @@ function bookmarkTile(bm) {
   const li = el('li');
   const a = el('a');
   a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
   const icon = el('span', 'icon', (bm.title || host).trim().charAt(0).toUpperCase());
   icon.style.background = `hsl(${hue(host)} 55% 50%)`;
   const img = el('img');
@@ -633,13 +876,6 @@ $('settings-toggle').addEventListener('click', (e) => {
   if (!form.hidden) {
     $('set-engine').value = state.settings.searchEngine;
     $('set-city').value = state.settings.city;
-    // Settings kept by an older page have no lists. Their fields stay hidden
-    // then, and the lists are left out of the save, so they aren't cleared.
-    const { crypto, shares } = state.settings;
-    $('set-crypto-label').hidden = !Array.isArray(crypto);
-    $('set-shares-label').hidden = !Array.isArray(shares);
-    $('set-crypto').value = (crypto || []).join(' ');
-    $('set-shares').value = (shares || []).join(' ');
     $('set-calendars-label').hidden = typeof state.settings.calendars !== 'number';
     $('set-calendars').value = '';
     calendarsHint();
@@ -664,8 +900,7 @@ function calendarsHint() {
 $('set-calendars-off').addEventListener('click', async () => {
   const status = $('set-status');
   try {
-    const { searchEngine, city } = state.settings;
-    state.settings = await api('/api/settings', { method: 'PUT', body: { searchEngine, city, calendars: [] } });
+    state.settings = await api('/api/settings', { method: 'PUT', body: { calendars: [] } });
     remember('settings', state.settings);
     calendarsHint();
     loadCalendar();
@@ -675,28 +910,19 @@ $('set-calendars-off').addEventListener('click', async () => {
   }
 });
 
-const tickerList = (s) => s.split(/[\s,;]+/).filter(Boolean);
-
 $('settings').addEventListener('submit', async (e) => {
   e.preventDefault();
   const status = $('set-status');
   try {
     const cityChanged = $('set-city').value.trim() !== state.settings.city;
     const body = { searchEngine: $('set-engine').value, city: $('set-city').value };
-    if (!$('set-crypto-label').hidden) body.crypto = tickerList($('set-crypto').value);
-    if (!$('set-shares-label').hidden) body.shares = tickerList($('set-shares').value);
     // Left out when empty, which keeps the saved links.
     const links = $('set-calendars').value.split(/\s+/).filter(Boolean);
     if (!$('set-calendars-label').hidden && links.length) body.calendars = links;
-    const before = JSON.stringify([state.settings.crypto, state.settings.shares]);
     state.settings = await api('/api/settings', { method: 'PUT', body });
     remember('settings', state.settings);
     updateHint();
     if (cityChanged) loadWeather();
-    if (JSON.stringify([state.settings.crypto, state.settings.shares]) !== before) loadMarkets();
-    // Show the lists as the server cleaned them: upper case, no repeats.
-    $('set-crypto').value = (state.settings.crypto || []).join(' ');
-    $('set-shares').value = (state.settings.shares || []).join(' ');
     if (body.calendars) {
       $('set-calendars').value = '';
       loadCalendar();
@@ -1116,6 +1342,7 @@ async function boot() {
   try {
     state.settings = await api('/api/settings');
     remember('settings', state.settings);
+    renderPicker(); // opened on the kept copy: now with the lists as stored
   } catch (e) {
     if (e instanceof AuthError) return;
     // The API failed but the page itself loaded: show it with defaults.

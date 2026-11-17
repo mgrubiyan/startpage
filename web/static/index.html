@@ -77,15 +77,6 @@
       <label>Город для погоды
         <input id="set-city" type="text" maxlength="60" required>
       </label>
-      <!-- Quotes are off in the demo, so their tickers are too. -->
-      <label class="edit-only" id="set-crypto-label">Криптовалюты, до 8
-        <input id="set-crypto" type="text" maxlength="100" placeholder="BTC ETH SOL TON"
-               autocomplete="off" autocapitalize="characters" spellcheck="false">
-      </label>
-      <label class="edit-only" id="set-shares-label">Акции Мосбиржи, до 8
-        <input id="set-shares" type="text" maxlength="120" placeholder="SBER GAZP LKOH YDEX"
-               autocomplete="off" autocapitalize="characters" spellcheck="false">
-      </label>
       <!-- Write-only: a saved link is read access to the calendar, so the page never gets it back. -->
       <label class="edit-only wide" id="set-calendars-label">Календари, до 4: ссылки по одной в строке
         <textarea id="set-calendars" rows="2" autocomplete="off" autocapitalize="off" spellcheck="false"
@@ -140,7 +131,11 @@
     <section class="board" aria-labelledby="markets-h">
       <div class="section-head">
         <h2 id="markets-h">Рынки</h2>
+        <div class="actions">
+          <button type="button" id="markets-edit" class="ghost edit-only" aria-controls="markets-picker">Изменить</button>
+        </div>
       </div>
+      <div id="markets-picker" class="picker" hidden></div>
       <div id="markets" class="markets"></div>
     </section>
 

@@ -143,6 +143,16 @@ func run() error {
 			return markets.NewMOEX(upstream, markets.DefaultIndex, markets.Shares(tickers(key))).Board(ctx)
 		}, cache.WithLoadTimeout(8*time.Second), cache.WithMaxEntries(4))
 	}
+	// What there is to pick from changes slowly: a listing now and then.
+	var catalog httpapi.CatalogSource
+	if !cfg.Demo {
+		catalog = cache.New(12*time.Hour, func(ctx context.Context, board string) ([]markets.Listing, error) {
+			if board == "crypto" {
+				return markets.BinanceCoins(ctx, upstream)
+			}
+			return markets.MOEXShares(ctx, upstream)
+		}, cache.WithLoadTimeout(9*time.Second), cache.WithMaxEntries(2))
+	}
 	// Keyed by feed URL. Parsed feeds are kept, and each request expands them
 	// for the viewer's time zone, so the zone isn't part of the key.
 	var calendars httpapi.CalendarSource
@@ -182,6 +192,7 @@ func run() error {
 		Art:               artwork,
 		Crypto:            cryptoBoard,
 		Stocks:            stocksBoard,
+		Catalog:           catalog,
 		Calendar:          calendars,
 		Auth:              authService,
 		LoginLimiter:      auth.NewLimiter(5, time.Minute),

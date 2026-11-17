@@ -26,7 +26,9 @@ are visible to Google.
   or the browser's.
 - **Markets**: up to 8 coins of your choice (BTC, ETH, SOL and TON by default) from
   Binance, falling back to Bybit, and the IMOEX index with up to 8 Moscow Exchange
-  shares (15 minutes delayed, as its free data is). The lists live in the settings;
+  shares (15 minutes delayed, as its free data is). The lists are picked right in
+  the panel: «Изменить» searches what Binance and the exchange's main board list,
+  by ticker or name, most traded first (the lists are cached for 12 hours);
   a ticker an exchange doesn't know is named under its board instead of emptying
   it. Each exchange is cached on its own, so one being down still shows the other. Off on the public demo: MOEX requires a contract to display its
   data to the public, and Binance has no policy that clearly allows it, while a
@@ -37,7 +39,7 @@ are visible to Google.
   events; days are cut in the browser's time zone.
 - **Painting of the day**: a public-domain (CC0) work from the Cleveland Museum of Art as the
   background, under a dark glass theme, with a caption linking to the museum's page.
-- **Bookmarks and settings**: stored in Postgres.
+- **Bookmarks and settings**: stored in Postgres. Bookmarks open in a new tab.
 - **Tasks and notes**: a to-do list and a scratchpad that saves itself as you type.
 - **Service monitor**: background prober with latency, last error and 24h uptime per service,
   plus optional Telegram alerts when a service goes down or comes back.
@@ -228,7 +230,7 @@ are open and writes are refused). JSON in, JSON out.
 | `POST` | `/api/login` | `{"password": "..."}` → sets the session cookie (204) |
 | `POST` | `/api/logout` | deletes the session |
 | `GET` | `/api/meta` | `{"demo": false}`: how the server runs (public) |
-| `GET` / `PUT` | `/api/settings` | `{"searchEngine": "g", "city": "Санкт-Петербург", "crypto": ["BTC", "ETH"], "shares": ["SBER"], "calendars": 1}`; a list left out of a `PUT` is kept. `calendars` is a count when read and a list of links when written (`[]` disconnects them) |
+| `GET` / `PUT` | `/api/settings` | `{"searchEngine": "g", "city": "Санкт-Петербург", "crypto": ["BTC", "ETH"], "shares": ["SBER"], "calendars": 1}`; a `PUT` is a patch: a field left out keeps its value (one atomic update). `calendars` is a count when read and a list of links when written (`[]` disconnects them) |
 | `GET` / `POST` | `/api/bookmarks` | list / add `{"title", "url"}` |
 | `DELETE` | `/api/bookmarks/{id}` | |
 | `GET` / `PUT` | `/api/note` | the scratchpad: `{"text"}` → `{"text", "updatedAt"}` |
@@ -241,6 +243,7 @@ are open and writes are refused). JSON in, JSON out.
 | `GET` | `/api/weather` | current weather and a five-day forecast (`days`, with sunrise/sunset) for the configured city |
 | `GET` | `/api/rates` | USD and EUR from the CBR, with previous values |
 | `GET` | `/api/markets` | crypto and MOEX boards for the settings' tickers, each with its source, delay, `stale`/`error` and the `missing` tickers; `available: false` with a `reason` on the demo |
+| `GET` | `/api/markets/catalog` | coins and shares to pick from, most traded first: `{"available", "crypto": {"items": [{"symbol", "name"}], "error"}, "shares": {…}}`; `available: false` on the demo |
 | `GET` | `/api/calendar?tz=` | events from now to the end of the 7th day in IANA zone `tz`: `{"configured", "from", "events": [{"title", "location", "start", "end", "allDay"}], "failed", "skipped", "stale"}`; all-day `start`/`end` are dates, `end` exclusive |
 | `GET` | `/api/suggest?q=` | search suggestions |
 | `GET` | `/api/art` | today's painting: `{"title", "artist", "date", "url", "image"}` |

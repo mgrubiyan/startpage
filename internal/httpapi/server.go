@@ -23,6 +23,8 @@ type Deps struct {
 	// Crypto and Stocks are the market boards; either may be nil to leave it out.
 	Crypto MarketSource
 	Stocks MarketSource
+	// Catalog lists the coins and shares to pick from; nil turns the picker off.
+	Catalog CatalogSource
 	// Calendar loads the feeds listed in the settings; nil hides the panel.
 	Calendar CalendarSource
 	Auth     Authenticator
@@ -80,6 +82,7 @@ func (a *api) routes() []route {
 		{"GET /api/rates", a.getRates, false},
 		{"GET /api/suggest", a.getSuggestions, false},
 		{"GET /api/markets", a.getMarkets, false},
+		{"GET /api/markets/catalog", a.getMarketCatalog, false},
 		{"GET /api/calendar", a.getCalendar, false},
 		{"GET /api/art", a.getArt, false},
 		{"GET /api/art/image", a.getArtImage, false},
@@ -99,6 +102,7 @@ func New(d Deps) http.Handler {
 		art:               d.Art,
 		crypto:            d.Crypto,
 		stocks:            d.Stocks,
+		catalog:           d.Catalog,
 		calendars:         d.Calendar,
 		auth:              d.Auth,
 		limiter:           d.LoginLimiter,
