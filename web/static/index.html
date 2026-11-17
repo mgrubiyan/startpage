@@ -86,7 +86,14 @@
         <input id="set-shares" type="text" maxlength="120" placeholder="SBER GAZP LKOH YDEX"
                autocomplete="off" autocapitalize="characters" spellcheck="false">
       </label>
+      <!-- Write-only: a saved link is read access to the calendar, so the page never gets it back. -->
+      <label class="edit-only wide" id="set-calendars-label">Календари, до 4: ссылки по одной в строке
+        <textarea id="set-calendars" rows="2" autocomplete="off" autocapitalize="off" spellcheck="false"
+                  placeholder="webcal://p00-caldav.icloud.com/published/2/…"></textarea>
+      </label>
+      <p class="edit-only wide muted set-hint" id="set-calendars-hint"></p>
       <button type="submit">Сохранить</button>
+      <button type="button" id="set-calendars-off" class="ghost edit-only" hidden>Отключить календари</button>
       <span id="set-status" class="muted"></span>
     </form>
 
@@ -114,6 +121,13 @@
                   placeholder="Что угодно: сохранится само"></textarea>
       </section>
     </div>
+
+    <section class="board" id="calendar-board" aria-labelledby="calendar-h" hidden>
+      <div class="section-head">
+        <h2 id="calendar-h">Календарь</h2>
+      </div>
+      <div id="calendar" class="agenda"></div>
+    </section>
 
     <section class="board" aria-labelledby="forecast-h">
       <div class="section-head">
