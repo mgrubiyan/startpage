@@ -23,6 +23,14 @@
   </section>
 
   <main id="app" class="wrap" hidden>
+    <button type="button" id="settings-toggle" class="corner edit-only" aria-label="Настройки"
+            aria-controls="settings" aria-expanded="false">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor"
+           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>
+      </svg>
+    </button>
     <p id="demo-banner" class="demo-banner" hidden>
       Демо: только просмотр, изменения отключены.
       <a href="https://github.com/mgrubiyan/startpage">Исходники на GitHub</a>
@@ -44,32 +52,6 @@
       </div>
     </header>
 
-    <form id="search" class="search" autocomplete="off" role="search">
-      <input id="q" name="q" type="text" spellcheck="false" autofocus
-             role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggestions"
-             placeholder="Поиск или адрес · g y d gh yt w — префиксы">
-      <span id="engine-hint" class="engine-hint"></span>
-      <ul id="suggestions" class="suggestions" role="listbox" hidden></ul>
-    </form>
-
-    <section class="section-head">
-      <h2>Закладки</h2>
-      <div class="actions">
-        <button type="button" id="edit-toggle" class="ghost edit-only">Изменить</button>
-        <button type="button" id="settings-toggle" class="ghost edit-only">Настройки</button>
-        <button type="button" id="logout" class="ghost edit-only">Выйти</button>
-      </div>
-    </section>
-
-    <ul id="bookmarks" class="bookmarks"></ul>
-
-    <form id="add-bookmark" class="inline-form" hidden>
-      <input id="bm-title" type="text" placeholder="Название" required maxlength="40">
-      <input id="bm-url" type="text" placeholder="https://…" required>
-      <button type="submit">Добавить</button>
-      <span id="bm-error" class="error"></span>
-    </form>
-
     <form id="settings" class="settings" hidden>
       <label>Поиск по умолчанию
         <select id="set-engine"></select>
@@ -86,7 +68,35 @@
       <button type="submit">Сохранить</button>
       <button type="button" id="set-calendars-off" class="ghost edit-only" hidden>Отключить календари</button>
       <span id="set-status" class="muted"></span>
+      <button type="button" id="logout" class="ghost edit-only">Выйти</button>
     </form>
+
+    <form id="search" class="search" autocomplete="off" role="search">
+      <input id="q" name="q" type="text" spellcheck="false" autofocus
+             role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggestions"
+             placeholder="Поиск или адрес">
+      <button type="button" id="engine-hint" class="engine-hint" aria-haspopup="true"
+              aria-expanded="false" aria-controls="prefixes" title="Где искать"></button>
+      <ul id="suggestions" class="suggestions" role="listbox" hidden></ul>
+      <div id="prefixes" class="suggestions prefixes" hidden></div>
+    </form>
+
+    <section class="section-head">
+      <h2>Закладки</h2>
+      <div class="actions">
+        <button type="button" id="edit-toggle" class="ghost edit-only">Изменить</button>
+      </div>
+    </section>
+
+    <ul id="bookmarks" class="bookmarks"></ul>
+
+    <form id="add-bookmark" class="inline-form" hidden>
+      <input id="bm-title" type="text" placeholder="Название" required maxlength="40">
+      <input id="bm-url" type="text" placeholder="https://…" required>
+      <button type="submit">Добавить</button>
+      <span id="bm-error" class="error"></span>
+    </form>
+
 
     <div class="desk">
       <section class="panel" aria-labelledby="tasks-h">
@@ -153,6 +163,12 @@
       <button type="submit">Добавить</button>
       <span id="svc-error" class="error"></span>
     </form>
+
+    <!-- Always in the page, so a screen reader hears each new message. -->
+    <div id="toast" class="toast" role="status" aria-live="polite">
+      <span id="toast-text"></span>
+      <button type="button" id="toast-undo">Вернуть</button>
+    </div>
   </main>
   <!-- Last, so on narrow screens it sits under the content instead of over it. -->
   <a id="art-caption" class="art-caption" target="_blank" rel="noopener noreferrer" hidden></a>

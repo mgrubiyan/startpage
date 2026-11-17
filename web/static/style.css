@@ -35,10 +35,31 @@ body {
 button, input, select, textarea { font: inherit; color: inherit; }
 
 .wrap {
+  position: relative;
   max-width: 760px;
   margin: 0 auto;
   padding: 12vh 16px 48px;
 }
+
+/* Settings live in the corner above the clock, apart from any one section. */
+.corner {
+  position: absolute;
+  top: 12px;
+  right: 10px;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: transform 160ms var(--ease-out), color .15s ease, background-color .15s ease;
+}
+.corner:active { transform: scale(.95); }
+.corner[aria-expanded="true"] { color: var(--text); background: var(--surface); }
+@media (hover: hover) and (pointer: fine) { .corner:hover { color: var(--text); background: var(--surface); } }
 
 .top {
   display: flex;
@@ -87,15 +108,50 @@ button, input, select, textarea { font: inherit; color: inherit; }
   outline: none;
 }
 .search input:focus { border-color: var(--accent); }
+/* Names where the query goes; a click lists the prefixes. */
 .engine-hint {
   position: absolute;
-  right: 18px;
+  right: 10px;
   top: 50%;
   transform: translateY(-50%);
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
   font-size: 13px;
   color: var(--muted);
-  pointer-events: none;
+  cursor: pointer;
+  transition: color .15s ease, background-color .15s ease;
 }
+.engine-hint::after { content: " ▾"; font-size: 10px; }
+.engine-hint[aria-expanded="true"] { color: var(--text); background: var(--bg); }
+@media (hover: hover) and (pointer: fine) { .engine-hint:hover { color: var(--text); background: var(--bg); } }
+.suggestions.prefixes { left: auto; width: min(320px, 100%); }
+.prefixes .prefix-note { margin: 4px 14px 6px; font-size: 12px; color: var(--muted); }
+.prefixes button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.prefixes button .muted { margin-left: auto; font-size: 12px; }
+.prefixes kbd {
+  min-width: 26px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: center;
+  color: var(--muted);
+}
+.prefixes button:focus-visible { background: var(--bg); outline: none; }
+@media (hover: hover) and (pointer: fine) { .prefixes button:hover { background: var(--bg); } }
 
 .suggestions {
   position: absolute;
@@ -227,6 +283,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
   min-width: 0;
 }
 .inline-form input { flex: 1 1 160px; }
+/* Opened from the corner, so right under the clock, above the search. */
+#settings { margin: -8px 0 28px; }
+#settings #logout { margin-left: auto; }
 .settings label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); flex: 1 1 200px; }
 .settings .wide { flex-basis: 100%; }
 .settings textarea {
@@ -558,7 +617,55 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 @media (max-width: 520px) {
   .time { font-size: 48px; }
-  .wrap { padding-top: 6vh; }
+  .wrap { padding-top: max(6vh, 56px); }
+  /* Four across, like a phone's home screen: more of them before scrolling. */
+  .bookmarks { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .bookmarks a { padding: 12px 4px 8px; gap: 6px; }
+  .bookmarks .label { font-size: 12px; }
+}
+
+/* ---------- undo toast ---------- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  padding: 6px 6px 6px 16px;
+  border-radius: 12px;
+  background: #1c1c1f;
+  color: #f5f5f7;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .3);
+  font-size: 14px;
+  transform: translate(-50%, 0);
+  transition: transform 200ms var(--ease-out), opacity 200ms var(--ease-out);
+}
+.toast:not([data-open]) {
+  opacity: 0;
+  transform: translate(-50%, 8px);
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform 150ms ease, opacity 150ms ease, visibility 0s 150ms;
+}
+#toast-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#toast-undo {
+  flex: none;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: #9db5ff;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 160ms var(--ease-out);
+}
+#toast-undo:active { transform: scale(.97); }
+@media (hover: hover) and (pointer: fine) { #toast-undo:hover { background: rgba(255, 255, 255, .1); } }
+@media (prefers-reduced-motion: reduce) {
+  .toast, .toast:not([data-open]) { transform: translate(-50%, 0); }
 }
 
 /* ---------- demo mode ---------- */
@@ -614,6 +721,7 @@ body.has-art {
 }
 .has-art :is(.chip, .search input, .suggestions, .bookmarks a, .services li, .demo-banner,
   .inline-form input, .settings input, .settings select, .login-card, .ghost:hover, .ghost[aria-pressed="true"],
+  .corner[aria-expanded="true"],
   .tasks li, .task-form input, .note, .forecast li, .quotes li, .pick, .pick-search input,
   .agenda-day, .settings textarea) {
   /* 12px reads the same as more and costs far less with dozens of tiles on a phone. */
@@ -622,6 +730,11 @@ body.has-art {
 }
 .has-art :is(.time, .date, .section-head h2) { text-shadow: 0 1px 14px rgba(0, 0, 0, .5); }
 .has-art .suggestions li[aria-selected="true"] { background: rgba(255, 255, 255, .12); }
+.has-art :is(.engine-hint[aria-expanded="true"], .prefixes button:focus-visible) { background: rgba(255, 255, 255, .12); }
+@media (hover: hover) and (pointer: fine) {
+  .has-art :is(.engine-hint, .prefixes button):hover { background: rgba(255, 255, 255, .12); }
+}
+.has-art .corner { filter: drop-shadow(0 1px 6px rgba(0, 0, 0, .5)); }
 @media (hover: hover) and (pointer: fine) { .has-art .suggestions li:hover { background: rgba(255, 255, 255, .12); } }
 .has-art :is(.search input, .task-form input, .note)::placeholder { color: rgba(245, 245, 247, .55); }
 

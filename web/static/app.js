@@ -91,6 +91,93 @@ async function api(path, { method = 'GET', body, signal, keepalive = false } = {
 
 const ignorable = (e) => e instanceof AuthError || e.name === 'AbortError';
 
+// ---------- undo ----------
+// A delete waits a few seconds behind a «Вернуть» toast, so a finger that
+// slipped onto a × costs nothing. One waits at a time: the next delete sends
+// the one before on its way, and so does leaving the tab (keepalive, so it
+// outlives the page). The wait pauses while the toast is pointed at or focused.
+const UNDO_MS = 5000;
+let undoing = null; // { commit(keepalive), undo() → element to focus, left, started, timer }
+const undoHolds = new Set();
+
+function armUndo(u) {
+  u.started = Date.now();
+  u.timer = setTimeout(() => { if (undoing === u) settleUndo(); }, u.left);
+}
+
+function closeToast() {
+  const t = $('toast');
+  if (t.contains(document.activeElement)) document.activeElement.blur();
+  delete t.dataset.open;
+  undoHolds.clear();
+}
+
+function settleUndo(keepalive = false) {
+  const u = undoing;
+  if (!u) return;
+  undoing = null;
+  clearTimeout(u.timer);
+  closeToast();
+  u.commit(keepalive);
+}
+
+function offerUndo(text, commit, undo) {
+  settleUndo();
+  undoing = { commit, undo, left: UNDO_MS };
+  $('toast').dataset.open = '';
+  $('toast-text').textContent = text;
+  armUndo(undoing);
+}
+
+function takeBack() {
+  const u = undoing;
+  if (!u) return;
+  undoing = null;
+  clearTimeout(u.timer);
+  closeToast();
+  u.undo()?.focus();
+}
+
+function holdUndo(why, on) {
+  if (on) undoHolds.add(why); else undoHolds.delete(why);
+  const u = undoing;
+  if (!u) return;
+  if (undoHolds.size && !u.paused) {
+    clearTimeout(u.timer);
+    u.left = Math.max(1000, u.left - (Date.now() - u.started));
+    u.paused = true;
+  } else if (!undoHolds.size && u.paused) {
+    u.paused = false;
+    armUndo(u);
+  }
+}
+
+$('toast-undo').addEventListener('click', takeBack);
+$('toast').addEventListener('pointerenter', () => holdUndo('pointer', true));
+$('toast').addEventListener('pointerleave', () => holdUndo('pointer', false));
+$('toast').addEventListener('focusin', () => holdUndo('focus', true));
+$('toast').addEventListener('focusout', () => holdUndo('focus', false));
+// ⌘Z / Ctrl+Z, outside a text field (which has its own undo).
+document.addEventListener('keydown', (e) => {
+  if (!undoing || e.key.toLowerCase() !== 'z' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+  const t = e.target;
+  if (t.closest && t.closest('input, textarea, select, [contenteditable]')) return;
+  e.preventDefault();
+  takeBack();
+});
+addEventListener('pagehide', () => settleUndo(true));
+document.addEventListener('visibilitychange', () => { if (document.hidden) settleUndo(true); });
+
+// Where the focus goes when the item holding it is taken off the list: the
+// same control on the next item, else the previous one, else the fallback.
+// Called before the list is redrawn; the function it returns, after.
+function focusAfterRemoval(li, selector, fallback) {
+  if (!li.contains(document.activeElement)) return () => {};
+  const ul = li.parentNode;
+  const near = [li.nextElementSibling, li.previousElementSibling].find((n) => n && n.dataset.id);
+  return () => ((near && ul.querySelector(`[data-id="${near.dataset.id}"] ${selector}`)) || fallback).focus();
+}
+
 // ---------- URLs ----------
 function safeUrl(raw) {
   try {
@@ -417,7 +504,16 @@ function pickBoard(b) {
     rm.type = 'button';
     rm.setAttribute('aria-label', 'Убрать ' + sym);
     rm.dataset.board = b.key;
-    rm.addEventListener('click', () => saveTickers(b.key, list.filter((s) => s !== sym)));
+    rm.addEventListener('click', () => {
+      const at = list.indexOf(sym);
+      saveTickers(b.key, list.filter((s) => s !== sym));
+      offerUndo(`${sym} убран`, () => {}, () => {
+        const now = state.settings[b.key] || [];
+        if (now.includes(sym) || now.length >= MAX_TICKERS) return null;
+        saveTickers(b.key, [...now.slice(0, at), sym, ...now.slice(at)]);
+        return null;
+      });
+    });
     li.append(rm);
     picked.append(li);
   });
@@ -693,22 +789,41 @@ function bookmarkTile(bm) {
   const rm = el('button', 'remove', '×');
   rm.type = 'button';
   rm.title = 'Удалить';
-  rm.addEventListener('click', async () => {
-    try {
-      await api(`/api/bookmarks/${bm.id}`, { method: 'DELETE' });
-      loadBookmarks();
-    } catch (e) {
-      if (!ignorable(e)) $('bm-error').textContent = e.message;
-    }
+  rm.setAttribute('aria-label', 'Удалить закладку: ' + (bm.title || host));
+  rm.addEventListener('click', () => {
+    const refocus = focusAfterRemoval(li, '.remove', $('bm-title'));
+    removing.bookmarks.add(bm.id);
+    renderBookmarks(bookmarks);
+    refocus();
+    offerUndo(`Закладка «${bm.title || host}» удалена`, async (keepalive) => {
+      try {
+        await api(`/api/bookmarks/${bm.id}`, { method: 'DELETE', keepalive });
+      } catch (e) {
+        if (!ignorable(e)) $('bm-error').textContent = e.message;
+      }
+      removing.bookmarks.delete(bm.id);
+      if (!keepalive) loadBookmarks();
+    }, () => {
+      removing.bookmarks.delete(bm.id);
+      renderBookmarks(bookmarks);
+      return $('bookmarks').querySelector(`[data-id="${bm.id}"] a`);
+    });
   });
+  li.dataset.id = bm.id;
   li.append(a, rm);
   return li;
 }
 
+// Taken off the screen at once, deleted on the server once the toast is gone.
+const removing = { bookmarks: new Set(), tasks: new Set() };
+let bookmarks = [];
+
 function renderBookmarks(items) {
+  bookmarks = items;
   const ul = $('bookmarks');
   ul.textContent = '';
   items.forEach((bm) => {
+    if (removing.bookmarks.has(bm.id)) return;
     const tile = bookmarkTile(bm);
     if (tile) ul.append(tile);
   });
@@ -869,18 +984,26 @@ Object.entries(ENGINES).forEach(([key, e]) => {
   $('set-engine').append(o);
 });
 
-$('settings-toggle').addEventListener('click', (e) => {
+function toggleSettings(open) {
   const form = $('settings');
-  form.hidden = !form.hidden;
-  e.currentTarget.setAttribute('aria-pressed', String(!form.hidden));
-  if (!form.hidden) {
-    $('set-engine').value = state.settings.searchEngine;
-    $('set-city').value = state.settings.city;
-    $('set-calendars-label').hidden = typeof state.settings.calendars !== 'number';
-    $('set-calendars').value = '';
-    calendarsHint();
-    $('set-status').textContent = '';
-  }
+  form.hidden = !open;
+  $('settings-toggle').setAttribute('aria-expanded', String(open));
+  if (!open) return;
+  $('set-engine').value = state.settings.searchEngine;
+  $('set-city').value = state.settings.city;
+  $('set-calendars-label').hidden = typeof state.settings.calendars !== 'number';
+  $('set-calendars').value = '';
+  calendarsHint();
+  $('set-status').textContent = '';
+  $('set-engine').focus();
+}
+
+$('settings-toggle').addEventListener('click', () => toggleSettings($('settings').hidden));
+// Esc closes them from anywhere inside, back to the gear that opened them.
+$('settings').addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  toggleSettings(false);
+  $('settings-toggle').focus();
 });
 
 // Saved links never come back from the server, so the form says how many
@@ -943,8 +1066,56 @@ let active = -1;
 
 function updateHint() {
   const r = resolveQuery(q.value);
-  $('engine-hint').textContent = r ? r.label : (ENGINES[state.settings.searchEngine] || ENGINES.g).name;
+  // "y " is Яндекс already, before the query is typed.
+  const { prefix } = parsePrefix(q.value.trimStart());
+  $('engine-hint').textContent = prefix ? ENGINES[prefix].name
+    : r ? r.label : (ENGINES[state.settings.searchEngine] || ENGINES.g).name;
 }
+
+// Where the query goes, named on the right of the field; a click on it lists
+// the prefixes, so they no longer need spelling out in the placeholder (which
+// a phone cut off mid-letter). A prefix picked there is put before the query.
+const prefixes = $('prefixes');
+const hintButton = $('engine-hint');
+
+function closePrefixes() {
+  prefixes.hidden = true;
+  hintButton.setAttribute('aria-expanded', 'false');
+}
+
+function openPrefixes() {
+  hideSuggestions();
+  prefixes.textContent = '';
+  prefixes.append(el('p', 'prefix-note', 'Префикс перед запросом ищет там: «y погода»'));
+  const { text } = parsePrefix(q.value.trim());
+  Object.entries(ENGINES).forEach(([key, e]) => {
+    const b = el('button');
+    b.type = 'button';
+    b.append(el('kbd', null, key), el('span', null, e.name));
+    if (key === state.settings.searchEngine) b.append(el('span', 'muted', 'по умолчанию'));
+    b.addEventListener('click', () => {
+      q.value = `${key} ${text}`;
+      closePrefixes();
+      q.focus();
+      updateHint();
+      if (text) fetchSuggestions();
+    });
+    prefixes.append(b);
+  });
+  prefixes.hidden = false;
+  hintButton.setAttribute('aria-expanded', 'true');
+}
+
+hintButton.addEventListener('click', () => (prefixes.hidden ? openPrefixes() : closePrefixes()));
+$('search').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !prefixes.hidden) { closePrefixes(); hintButton.focus(); }
+});
+document.addEventListener('pointerdown', (e) => {
+  if (!prefixes.hidden && !prefixes.contains(e.target) && !hintButton.contains(e.target)) closePrefixes();
+});
+$('search').addEventListener('focusout', (e) => {
+  if (!$('search').contains(e.relatedTarget)) closePrefixes();
+});
 
 function hideSuggestions() {
   sugList.hidden = true;
@@ -1007,6 +1178,7 @@ function go() {
 }
 
 q.addEventListener('input', () => {
+  closePrefixes();
   updateHint();
   clearTimeout(suggestTimer);
   suggestTimer = setTimeout(fetchSuggestions, 150);
@@ -1044,7 +1216,7 @@ function moveTask(list, saved) {
 }
 
 function updateTasksClear() {
-  const done = tasks.filter((t) => t.done).length;
+  const done = tasks.filter((t) => t.done && !removing.tasks.has(t.id)).length;
   $('tasks-clear').hidden = done === 0;
   $('tasks-clear').textContent = `Убрать выполненные (${done})`;
 }
@@ -1087,14 +1259,26 @@ function taskItem(t) {
   rm.type = 'button';
   rm.title = 'Удалить';
   rm.setAttribute('aria-label', 'Удалить задачу: ' + t.title);
-  rm.addEventListener('click', async () => {
-    try {
-      await api(`/api/tasks/${t.id}`, { method: 'DELETE' });
-      loadTasks();
-    } catch (e) {
-      if (!ignorable(e)) $('tasks-error').textContent = e.message;
-    }
+  rm.addEventListener('click', () => {
+    const refocus = focusAfterRemoval(li, '.del', $('task-title'));
+    removing.tasks.add(t.id);
+    drawTasks();
+    refocus();
+    offerUndo(`Задача «${t.title}» удалена`, async (keepalive) => {
+      try {
+        await api(`/api/tasks/${t.id}`, { method: 'DELETE', keepalive });
+      } catch (e) {
+        if (!ignorable(e)) $('tasks-error').textContent = e.message;
+      }
+      removing.tasks.delete(t.id);
+      if (!keepalive) loadTasks();
+    }, () => {
+      removing.tasks.delete(t.id);
+      drawTasks();
+      return $('tasks').querySelector(`[data-id="${t.id}"] input`);
+    });
   });
+  li.dataset.id = t.id;
   li.append(label, rm);
   return li;
 }
@@ -1102,10 +1286,16 @@ function taskItem(t) {
 function renderTasks(list) {
   tasks = list;
   tasksSorted = list; // both the server and the kept copy send them sorted
+  drawTasks();
+}
+
+// The list as it stands, less the tasks waiting to be deleted.
+function drawTasks() {
   const ul = $('tasks');
   ul.textContent = '';
-  if (!list.length) ul.append(el('li', 'empty', 'Задач нет'));
-  list.forEach((t) => ul.append(taskItem(t)));
+  const shown = tasks.filter((t) => !removing.tasks.has(t.id));
+  if (!shown.length) ul.append(el('li', 'empty', 'Задач нет'));
+  shown.forEach((t) => ul.append(taskItem(t)));
   updateTasksClear();
 }
 
