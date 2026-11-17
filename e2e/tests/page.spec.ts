@@ -75,13 +75,17 @@ test('a new tab opens from the last answers, before the API replies', async ({ p
 
 test('coins are picked from the exchange list, and bookmarks open in a new tab', async ({ page }) => {
   // The exchanges' lists, stood in for: CI has no business with Binance.
-  await page.route('**/api/markets/catalog', (route) => route.fulfill({
-    json: {
+  // They're held back until something is typed, as a slow exchange would.
+  let release: () => void = () => {};
+  const listed = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/api/markets/catalog', async (route) => {
+    await listed;
+    await route.fulfill({ json: {
       available: true,
       crypto: { items: [{ symbol: 'BTC', name: 'Bitcoin' }, { symbol: 'DOGE', name: 'Dogecoin' }, { symbol: 'DOT', name: 'Polkadot' }] },
       shares: { items: [], error: 'список недоступен' },
-    },
-  }));
+    } });
+  });
   await page.request.post('/api/bookmarks', { data: { title: 'Вкладка', url: 'https://example.com' } });
   await page.goto('/');
 
@@ -93,6 +97,8 @@ test('coins are picked from the exchange list, and bookmarks open in a new tab',
   const coins = page.getByRole('combobox', { name: 'Криптовалюты: добавить' });
   await expect(coins).toBeFocused();
   await coins.fill('dog');
+  release(); // the lists arrive mid-word: what was typed stays, now with suggestions
+  await expect(coins).toHaveValue('dog');
   await expect(page.getByRole('option')).toHaveText(['DOGEDogecoin']);
   await coins.press('Enter');
 

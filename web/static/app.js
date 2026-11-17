@@ -358,20 +358,29 @@ function matches(board, query, taken) {
   return ranked.flat().slice(0, MAX_OPTIONS);
 }
 
-async function saveTickers(board, list, note) {
+let pickerError = null; // { board, text } of the last failed save, until the next change
+let pickerSaves = 0;
+
+// The chip shows at once and the save follows; a failed save puts the list
+// back. Only the latest save's answer is taken: an earlier one would drop a
+// chip added since.
+async function saveTickers(board, list) {
+  const before = state.settings[board];
+  const seq = ++pickerSaves;
+  pickerError = null;
+  state.settings = { ...state.settings, [board]: list };
+  renderPicker();
   const { searchEngine, city } = state.settings;
-  note.className = 'pick-note';
-  note.textContent = 'сохраняю…';
   try {
-    state.settings = await api('/api/settings', { method: 'PUT', body: { searchEngine, city, [board]: list } });
-    remember('settings', state.settings);
-    note.textContent = '';
+    const saved = await api('/api/settings', { method: 'PUT', body: { searchEngine, city, [board]: list } });
+    if (seq !== pickerSaves) return;
+    state.settings = saved;
+    remember('settings', saved);
     loadMarkets();
   } catch (e) {
-    if (ignorable(e)) return;
-    note.className = 'pick-note error';
-    note.textContent = 'Не сохранилось: ' + e.message;
-    return; // keep the message: a redraw would wipe it
+    if (ignorable(e) || seq !== pickerSaves) return;
+    state.settings = { ...state.settings, [board]: before };
+    pickerError = { board, text: 'Не сохранилось: ' + e.message };
   }
   renderPicker();
 }
@@ -394,7 +403,8 @@ function pickBoard(b) {
     const rm = el('button', null, '×');
     rm.type = 'button';
     rm.setAttribute('aria-label', 'Убрать ' + sym);
-    rm.addEventListener('click', () => saveTickers(b.key, list.filter((s) => s !== sym), note));
+    rm.dataset.board = b.key;
+    rm.addEventListener('click', () => saveTickers(b.key, list.filter((s) => s !== sym)));
     li.append(rm);
     picked.append(li);
   });
@@ -409,6 +419,7 @@ function pickBoard(b) {
   input.setAttribute('aria-autocomplete', 'list');
   input.setAttribute('aria-expanded', 'false');
   input.setAttribute('aria-label', b.title + ': добавить');
+  input.dataset.board = b.key;
   const full = list.length >= MAX_TICKERS;
   input.disabled = full;
   input.placeholder = full ? `Уже ${MAX_TICKERS}: уберите одну, чтобы добавить` : b.placeholder;
@@ -420,7 +431,12 @@ function pickBoard(b) {
   search.append(input, options);
 
   const cat = catalog && catalog[b.key];
-  if (cat && cat.error) note.textContent = `Список ${b.source} недоступен: тикер можно вписать вручную и нажать Enter.`;
+  if (pickerError && pickerError.board === b.key) {
+    note.className = 'pick-note error';
+    note.textContent = pickerError.text;
+  } else if (cat && cat.error) {
+    note.textContent = `Список ${b.source} недоступен: тикер можно вписать вручную и нажать Enter.`;
+  }
 
   let shown = [];
   let active = -1;
@@ -433,7 +449,8 @@ function pickBoard(b) {
   const add = (sym) => {
     if (list.includes(sym) || list.length >= MAX_TICKERS) return;
     close();
-    saveTickers(b.key, [...list, sym], note);
+    input.value = '';
+    saveTickers(b.key, [...list, sym]);
   };
   const update = () => {
     shown = matches(b.key, input.value, list);
@@ -476,13 +493,26 @@ function pickBoard(b) {
 function renderPicker() {
   const root = $('markets-picker');
   if (root.hidden) return;
-  // Redrawn after every change: keep typing where the user was.
-  const focused = root.contains(document.activeElement) ? document.activeElement.getAttribute('aria-label') : null;
+  // Redrawn after every change and once the lists arrive: the board being
+  // edited keeps the focus, in its search field with what was typed there
+  // (the lists may come in mid-word), or on its last chip once it's full.
+  const active = root.contains(document.activeElement) ? document.activeElement : null;
+  const focused = active && active.dataset.board;
+  const typed = active && active.tagName === 'INPUT' ? active.value : '';
   root.textContent = '';
   BOARDS.forEach((b) => {
     const { box, input } = pickBoard(b);
     root.append(box);
-    if (focused && input.getAttribute('aria-label') === focused && !input.disabled) input.focus();
+    if (focused !== b.key) return;
+    if (input.disabled) {
+      box.querySelector('.picked li:last-child button')?.focus();
+      return;
+    }
+    input.focus();
+    if (typed) {
+      input.value = typed;
+      input.dispatchEvent(new Event('input')); // its suggestions, from the lists now here
+    }
   });
 }
 
@@ -530,6 +560,9 @@ function agendaItem(e, day) {
   const what = el('span', 'what', e.title);
   const tip = [e.title];
   if (e.allDay) {
+    const when = el('span', 'when');
+    when.append(el('span', 'day-mark'), el('span', 'sr-only', 'весь день'));
+    li.append(when);
     const last = localDay(e.end);
     last.setDate(last.getDate() - 1); // the end date is exclusive
     if (isoDay(last) > day) what.append(el('span', 'where', 'до ' + shortDay(last)));
