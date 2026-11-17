@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test';
 
 test('a checked task stays where it is until the list is next loaded', async ({ page }) => {
+  // It asserts the whole list: start from an empty one, whatever ran before.
+  for (const t of await (await page.request.get('/api/tasks')).json()) {
+    await page.request.delete(`/api/tasks/${t.id}`);
+  }
   await page.goto('/');
   const input = page.locator('#task-title');
   const titles = page.locator('#tasks .title');
@@ -55,9 +59,12 @@ test('the note is locked until its text has loaded', async ({ page }) => {
 });
 
 test('a new tab opens from the last answers, before the API replies', async ({ page }) => {
-  await page.request.post('/api/bookmarks', { data: { title: 'Пример', url: 'https://example.com' } });
+  // Its own bookmark and task, so it passes alone and again (--repeat-each).
+  const title = `Пример ${Date.now()}`;
+  await page.request.post('/api/bookmarks', { data: { title, url: 'https://example.com' } });
+  await page.request.post('/api/tasks', { data: { title } });
   await page.goto('/');
-  const tile = page.locator('#bookmarks li', { hasText: 'Пример' });
+  const tile = page.locator('#bookmarks li', { hasText: title });
   await expect(tile).toBeVisible();
 
   // Hold the bookmarks and tasks back: what shows now comes from the kept copy.
@@ -69,7 +76,7 @@ test('a new tab opens from the last answers, before the API replies', async ({ p
   });
   await page.reload();
   await expect(tile).toBeVisible({ timeout: 1000 });
-  await expect(page.locator('#tasks .title').first()).toBeVisible({ timeout: 1000 });
+  await expect(page.locator('#tasks .title', { hasText: title })).toBeVisible({ timeout: 1000 });
   release();
 });
 

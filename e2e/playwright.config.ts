@@ -10,7 +10,7 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  // No retries: each retry logs in again, and the server allows 5 logins a minute.
+  // No retries: a flaky test should be fixed, not hidden.
   retries: 0,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   globalSetup: './global-setup.ts',
@@ -32,6 +32,8 @@ export default defineConfig({
       DATABASE_URL: databaseURL,
       STARTPAGE_ADDR: `127.0.0.1:${port}`,
       STARTPAGE_PASSWORD: password,
+      // The session tests log in several times; at 5 a minute a repeated run (--repeat-each) is refused.
+      STARTPAGE_LOGIN_RATE: '60',
     },
   },
 });

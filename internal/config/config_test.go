@@ -155,6 +155,28 @@ func TestTelegram(t *testing.T) {
 	}
 }
 
+func TestLoginRate(t *testing.T) {
+	base := map[string]string{"DATABASE_URL": "postgres://db/startpage", "STARTPAGE_PASSWORD": "long-enough"}
+	with := func(v string) map[string]string {
+		m := map[string]string{"STARTPAGE_LOGIN_RATE": v}
+		for k, x := range base {
+			m[k] = x
+		}
+		return m
+	}
+	if cfg, err := Load(env(base)); err != nil || cfg.LoginRate != 5 {
+		t.Fatalf("default: %d, %v", cfg.LoginRate, err)
+	}
+	if cfg, err := Load(env(with("60"))); err != nil || cfg.LoginRate != 60 {
+		t.Fatalf("60: %d, %v", cfg.LoginRate, err)
+	}
+	for _, bad := range []string{"0", "-1", "lots", "1001"} {
+		if _, err := Load(env(with(bad))); err == nil || !strings.Contains(err.Error(), "STARTPAGE_LOGIN_RATE") {
+			t.Errorf("%q: err = %v", bad, err)
+		}
+	}
+}
+
 func TestDemoNeedsNoPassword(t *testing.T) {
 	cfg, err := Load(env(map[string]string{
 		"DATABASE_URL":   "postgres://db/startpage",

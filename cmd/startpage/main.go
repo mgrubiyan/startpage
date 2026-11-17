@@ -225,7 +225,7 @@ func run() error {
 		Catalog:           catalog,
 		Calendar:          calendars,
 		Auth:              authService,
-		LoginLimiter:      auth.NewLimiter(5, time.Minute),
+		LoginLimiter:      auth.NewLimiter(cfg.LoginRate, time.Minute),
 		SecureCookie:      cfg.SecureCookie,
 		TrustProxy:        cfg.TrustProxy,
 		OnServicesChanged: mon.Trigger,

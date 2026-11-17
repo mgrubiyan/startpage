@@ -4,7 +4,11 @@
   --text: #1c1c1e;
   --muted: #6e6e73;
   --border: #e3e1dc;
-  --accent: #3b6ef5;
+  --accent: #2f62e8;
+  /* Text on an accent fill: white on the light theme's blue, dark on the lighter blues. */
+  --on-accent: #fff;
+  /* Rises, as text: dark enough to read on white (4.5:1), unlike the status dots' green. */
+  --up: #1a7f37;
   --danger: #d93a3a;
   --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.05);
   /* One curve for everything that answers the user: fast at first, so the
@@ -19,6 +23,8 @@
     --muted: #8e8e95;
     --border: #2c2c31;
     --accent: #7a9bff;
+    --on-accent: #0b1020;
+    --up: #3fb950;
     --danger: #ff6b6b;
     --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
   }
@@ -96,7 +102,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* The CBR chip's arrows. Scoped: as bare .up/.down they also shrank and
    shifted anything else named so, like the status bars. */
 .chip-value :is(.up, .down) { font-size: 10px; margin: 0 6px 0 3px; vertical-align: 1px; }
-.chip-value .up { color: #2e9d57; }
+.chip-value .up { color: var(--up); }
 .chip-value .down { color: var(--danger); }
 
 .search { position: relative; margin-bottom: 36px; }
@@ -255,18 +261,19 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .icon img { width: 24px; height: 24px; }
 .label { font-size: 13px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 24px: the smallest target WCAG 2.2 allows (2.5.8), tiles sit close together. */
 .remove {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 22px;
-  height: 22px;
+  top: -7px;
+  right: -7px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   border: 0;
   background: var(--danger);
   color: #fff;
   cursor: pointer;
-  line-height: 22px;
+  line-height: 24px;
   padding: 0;
   display: none;
 }
@@ -320,7 +327,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border-radius: 10px;
   border: 0;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   cursor: pointer;
 }
 
@@ -634,9 +641,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .quotes .price { white-space: nowrap; }
 .quotes .chg { text-align: right; font-size: 13px; white-space: nowrap; color: var(--muted); }
 /* pos/neg, not up/down: those carry the CBR arrows' size and margins. */
-.quotes .chg.pos { color: #2e9d57; }
+.quotes .chg.pos { color: var(--up); }
 .quotes .chg.neg { color: var(--danger); }
-.has-art .quotes .chg.pos { color: #6fd894; }
 .has-art .quotes .chg.neg { color: #ff8a8a; }
 .quotes li.empty { display: block; color: var(--muted); font-size: 13px; }
 .market.stale .quotes li { opacity: .7; }
@@ -746,6 +752,8 @@ body.has-art {
   --muted: rgba(245, 245, 247, .78);
   --border: rgba(255, 255, 255, .14);
   --accent: #9db5ff;
+  --on-accent: #0b1020;
+  --up: #6fd894;
   --shadow: 0 8px 32px rgba(0, 0, 0, .28);
   color-scheme: dark;
 }
