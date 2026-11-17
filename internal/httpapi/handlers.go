@@ -22,6 +22,7 @@ type Store interface {
 	Bookmarks(ctx context.Context) ([]store.Bookmark, error)
 	AddBookmark(ctx context.Context, b store.Bookmark) (store.Bookmark, error)
 	DeleteBookmark(ctx context.Context, id int64) error
+	ReorderBookmarks(ctx context.Context, ids []int64) error
 	Note(ctx context.Context) (store.Note, error)
 	SaveNote(ctx context.Context, text string) (store.Note, error)
 	Tasks(ctx context.Context) ([]store.Task, error)
@@ -318,6 +319,31 @@ func (a *api) createBookmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, bookmarkDTO(b))
+}
+
+// maxBookmarks bounds a reorder request; far above any real start page.
+const maxBookmarks = 500
+
+func (a *api) reorderBookmarks(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := decodeJSON(w, r, &in); err != nil {
+		badBody(w, err)
+		return
+	}
+	if len(in.IDs) > maxBookmarks {
+		writeError(w, http.StatusBadRequest, "ids: too many")
+		return
+	}
+	switch err := a.store.ReorderBookmarks(r.Context(), in.IDs); {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, store.ErrConflict):
+		writeError(w, http.StatusConflict, "bookmarks changed: reload and try again")
+	default:
+		a.internalError(w, r, err)
+	}
 }
 
 func (a *api) deleteBookmark(w http.ResponseWriter, r *http.Request) {

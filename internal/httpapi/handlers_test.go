@@ -116,6 +116,32 @@ func (f *fakeStore) DeleteBookmark(_ context.Context, id int64) error {
 	return store.ErrNotFound
 }
 
+func (f *fakeStore) ReorderBookmarks(_ context.Context, ids []int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failWith != nil {
+		return f.failWith
+	}
+	byID := make(map[int64]store.Bookmark, len(f.bookmarks))
+	for _, b := range f.bookmarks {
+		byID[b.ID] = b
+	}
+	if len(ids) != len(byID) {
+		return store.ErrConflict
+	}
+	out := make([]store.Bookmark, 0, len(ids))
+	for _, id := range ids {
+		b, ok := byID[id]
+		if !ok {
+			return store.ErrConflict
+		}
+		delete(byID, id) // a repeated id is then missing: a conflict too
+		out = append(out, b)
+	}
+	f.bookmarks = out
+	return nil
+}
+
 func (f *fakeStore) Note(context.Context) (store.Note, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -424,6 +450,8 @@ func TestValidationAndStatusCodes(t *testing.T) {
 		{"bookmark title 40 runes", "POST", "/api/bookmarks", `{"title":"` + strings.Repeat("я", 40) + `","url":"https://go.dev"}`, 201, ""},
 		{"bookmark control char", "POST", "/api/bookmarks", `{"title":"a\u0000b","url":"https://go.dev"}`, 400, "control"},
 		{"unknown field", "POST", "/api/bookmarks", `{"title":"x","url":"https://go.dev","admin":true}`, 400, "unknown field"},
+		{"reorder stale list", "PUT", "/api/bookmarks/order", `{"ids":[999]}`, 409, "reload"},
+		{"reorder bad ids", "PUT", "/api/bookmarks/order", `{"ids":"1,2"}`, 400, ""},
 		{"trailing data", "POST", "/api/bookmarks", `{"title":"x","url":"https://go.dev"}{}`, 400, "unexpected data"},
 		{"trailing brace", "POST", "/api/bookmarks", `{"title":"x","url":"https://go.dev"}}`, 400, "invalid json"},
 		{"trailing whitespace ok", "POST", "/api/bookmarks", "{\"title\":\"x\",\"url\":\"https://go.dev\"}\n ", 201, ""},

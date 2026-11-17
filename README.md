@@ -39,7 +39,8 @@ are visible to Google.
   events; days are cut in the browser's time zone.
 - **Painting of the day**: a public-domain (CC0) work from the Cleveland Museum of Art as the
   background, under a dark glass theme, with a caption linking to the museum's page.
-- **Bookmarks and settings**: stored in Postgres. Bookmarks open in a new tab.
+- **Bookmarks and settings**: stored in Postgres. Bookmarks open in a new tab;
+  in «Изменить» they are dragged into order (or moved with Alt+←/→).
 - **Tasks and notes**: a to-do list and a scratchpad that saves itself as you type.
 - **Service monitor**: background prober with latency, last error and 24h uptime per service,
   plus optional Telegram alerts when a service goes down or comes back.
@@ -233,6 +234,7 @@ are open and writes are refused). JSON in, JSON out.
 | `GET` / `PUT` | `/api/settings` | `{"searchEngine": "g", "city": "Санкт-Петербург", "crypto": ["BTC", "ETH"], "shares": ["SBER"], "calendars": 1}`; a `PUT` is a patch: a field left out keeps its value (one atomic update). `calendars` is a count when read and a list of links when written (`[]` disconnects them) |
 | `GET` / `POST` | `/api/bookmarks` | list / add `{"title", "url"}` |
 | `DELETE` | `/api/bookmarks/{id}` | |
+| `PUT` | `/api/bookmarks/order` | `{"ids": [3, 1, 2]}`, every bookmark once; `409` if the list changed meanwhile |
 | `GET` / `PUT` | `/api/note` | the scratchpad: `{"text"}` → `{"text", "updatedAt"}` |
 | `GET` / `POST` | `/api/tasks` | open tasks first, then done ones / add `{"title"}` |
 | `PATCH` | `/api/tasks/{id}` | `{"done": true}` or `false` |
