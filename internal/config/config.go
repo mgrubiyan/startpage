@@ -19,7 +19,9 @@ type Config struct {
 	TrustProxy      bool
 	SessionTTL      time.Duration
 	MonitorInterval time.Duration
-	LogLevel        slog.Level
+	// LoginRate is how many logins a client may try per minute.
+	LoginRate int
+	LogLevel  slog.Level
 	// Demo runs a public read-only showcase: no login, every write refused.
 	Demo bool
 	// Telegram alerts from the monitor; both empty means no alerts.
@@ -79,6 +81,9 @@ func Load(getenv func(string) string) (Config, error) {
 		errs = append(errs, err)
 	}
 	if cfg.MonitorInterval, err = parseDuration(getenv, "STARTPAGE_MONITOR_INTERVAL", time.Minute, 5*time.Second); err != nil {
+		errs = append(errs, err)
+	}
+	if cfg.LoginRate, err = parseInt(getenv, "STARTPAGE_LOGIN_RATE", 5, 1, 1000); err != nil {
 		errs = append(errs, err)
 	}
 	cfg.TelegramToken, cfg.TelegramChatID = getenv("TELEGRAM_BOT_TOKEN"), getenv("TELEGRAM_CHAT_ID")
@@ -141,6 +146,18 @@ func parseBool(getenv func(string) string, key string, def bool) (bool, error) {
 	v, err := strconv.ParseBool(raw)
 	if err != nil {
 		return false, fmt.Errorf("%s: %w", key, err)
+	}
+	return v, nil
+}
+
+func parseInt(getenv func(string) string, key string, def, minimum, maximum int) (int, error) {
+	raw := getenv(key)
+	if raw == "" {
+		return def, nil
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < minimum || v > maximum {
+		return 0, fmt.Errorf("%s: want a whole number from %d to %d, got %q", key, minimum, maximum, raw)
 	}
 	return v, nil
 }

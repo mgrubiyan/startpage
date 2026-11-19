@@ -288,6 +288,7 @@ make run-demo   # the same, in read-only demo mode
 | `STARTPAGE_TRUST_PROXY` | `false` | use the last `X-Forwarded-For` entry as client IP |
 | `STARTPAGE_SESSION_TTL` | `720h` | session lifetime |
 | `STARTPAGE_MONITOR_INTERVAL` | `1m` | probe interval (min `5s`) |
+| `STARTPAGE_LOGIN_RATE` | `5` | login attempts per client per minute |
 | `TELEGRAM_BOT_TOKEN` | (none) | bot token from @BotFather; enables monitor alerts |
 | `TELEGRAM_CHAT_ID` | (none) | chat to alert, set together with the token |
 | `STARTPAGE_DIGEST_AT` | `08:00` | morning digest time (`HH:MM`), or `off`; only with the bot set |
