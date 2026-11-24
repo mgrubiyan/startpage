@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           # The same release line as the Dockerfile's golang:1.27-alpine, latest
           # patch: govulncheck judges the standard library of the Go it runs with.
